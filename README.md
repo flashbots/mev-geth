@@ -1,42 +1,85 @@
-## MEV-geth
+# MEV-geth
 
 This is a fork of go-ethereum, [the original README is here](README.original.md).
 
-Flashbots is a research and development organization formed to mitigate the negative externalities the miner-extractable value (MEV) crisis poses to smart-contract-based blockchains by creating an open-entry, transparent and fair marketplace for MEV extraction, starting with Ethereum.
+Flashbots is a research and development organization formed to mitigate the negative externalities and existential risks posed by miner-extractable value (MEV) to smart-contract blockchains. We propose a permissionless, transparent, and fair ecosystem for MEV extraction that reinforce the Ethereum ideals.
 
-To fix this problem, we have designed and implemented a PoC for permissionless MEV extraction as a fork of geth. It is a sealed-bid block space auction mechanism that aims to obviate the use of frontrunning and backrunning techniques.
+## MEV-Geth: a proof of concept
+
+We have designed and implemented a proof of concept for permissionless MEV extraction called MEV-Geth. It is a sealed-bid block space auction mechanism for communicating transaction order preference. While our proof of concept has incomplete trust guarantees, we believe it's a significant improvement over the status quo. The adoption of MEV-Geth should relieve a lot of the network and chain congestion caused by frontrunning and backrunning bots.
+
+| Guarantee            | PGA | Dark-txPool | MEV-Geth |
+| -------------------- |:---:|:--------:|:-----------:|
+| Permissionless       | ✅  |    ❌    |     ✅      |
+| Efficient            | ❌  |    ❌    |     ✅      |
+| Pre-trade privacy    | ❌  |    ✅    |     ✅      |
+| Failed trade privacy | ❌  |    ❌    |     ✅      |
+| Complete privacy     | ❌  |    ❌    |     ❌      |
+| Finality             | ❌  |    ❌    |     ❌      |
+
+### Why MEV-Geth?
+
+We believe that without the adoption of neutral, public, open-source infrastructure for permissionless MEV extraction, MEV risks becoming an insiders' game. We commit as an organization to releasing reference implementations for participation in fair, ethical, and politically neutral MEV extraction. By doing so, we hope to prevent the properties of Ethereum from being eroded by trust-based dark pools or proprietary channels which are key points of security weakness. We thus release MEV-Geth with the dual goal of creating an ecosystem for MEV extraction that preserves Ethereum properties, as well as starting conversations with the community around our research and development roadmap.
 
 ### Design goals
-* Permissionless: allow anyone to participate in MEV extraction
-* Pre-trade privacy: keep MEV extraction requests hidden until mined
-* MEV Coverage: cover all known classes of measurable MEV extraction strategies
-* Compatibility: maintain full compatibility with the network
-* Security: avoid impacting current node operation
-* Efficiency: minimize latency
 
+- **Permissionless**  
+A permissionless design implies there are no trusted intermediary which can censor transactions. 
+- **Efficient**  
+An efficient design implies MEV extraction is performed without causing unnecessary network or chain congestion.
+- **Pre-trade privacy**  
+Pre-trade privacy implies transactions only become publicly known after they have been included in a block. Note, this type of privacy does not exclude privileged actors such as transaction aggregators / gateways / miners.
+- **Failed trade privacy**  
+Failed trade privacy implies loosing bids are never included in a block, thus never exposed to the public. Failed trade privacy is tightly coupled to extraction efficiency.
+- **Complete privacy**  
+Complete privacy implies there are no privileged actors such as transaction aggregators / gateways / miners who can observe incoming transactions.
+- **Finality**  
+Finality implies it is infeasible for MEV extraction to be reversed once included in a block. This would protect against time-bandit chain re-org attacks.
+
+The MEV-Geth proof of concept relies on the fact that searchers can withhold bids from certain miners in order to disincentivize bad behavior like stealing a profitable strategy. We expect a complete privacy design to necessitate some sort of private computation solution like SGX, ZKP, or MPC to withhold the transaction content from miners until it is mined in a block. One of the core objective of the Flashbots organization is to incentivize and produce research in this direction.
+
+The MEV-Geth proof of concept does not provide any finality guarantees. We expect the solution to this problem to require post-trade execution privacy through private chain state or strong economic infeasibility. The design of a system with strong finality is the second core objective of the MEV-Geth research effort. 
 
 ### How it works
-MEV-geth implements a new RPC method to accept bundles of ethereum transactions over https.
 
-Once received, the bundles are validated and placed in a local bundle pool. Bundles in the bundle pool are not be gossiped to the rest of the network.
+MEV-Geth introduces the concepts of "searchers", "transaction bundles", and "block template" to Ethereum. Effectively, MEV-Geth provides a way for miners to delegate the task of finding and ordering transactions to third parties called "searchers". These searchers compete with each other to find the most profitable ordering and bid for its inclusion in the next block using a standardized template called a "transaction bundle". These bundles are evaluated in a sealed-bid auction hosted by miners to produce a "block template" which holds the [information about transaction order required to begin mining](https://ethereum.stackexchange.com/questions/268/ethereum-block-architecture).
 
-MEV-geth then selects the bundle that offers the highest payment to the miner and includes it at the beginning of a block template. The remainder of the block template is then filled with transactions from the mempool.
-In parallel, the client produces a ‘normal’ block template based on the regular transaction pool.
+![](https://hackmd.io/_uploads/B1fWz7rcD.png)
 
-Finally, MEV-geth compares the revenue of each template (normal vs MEV-geth) and starts mining on the most profitable one. This last step ensures that at worst, miners running MEV-geth end up with the status quo.
+The MEV-Geth proof of concept is compatible with any regular Ethereum client. The Flashbots core devs are maintaining [a reference implementation](https://github.com/flashbots/mev-geth) for the go-ethereum client.
 
 ### How to use as a searcher
-Anyone interested in extracting MEV can do so by sending bundles of transactions to MEV-geth clients. We call this role being a searcher. A searcher’s job is to monitor the ethereum state and transaction pool for MEV opportunities and produce flashbots bundles that extract that MEV. A flashbots bundle is composed of an array of valid ethereum transactions, a blockheight, and a timestamp range over which the bundle is valid.
 
-```jsonc
+A searcher's job is to monitor the Ethereum state and transaction pool for MEV opportunities and produce transaction bundles that extract that MEV. Anyone can become a searcher. In fact, the bundles produced by searchers don't need to extract MEV at all, but we expect the most valuable bundles will. An MEV-Geth bundle is a standard message template composed of an array of valid ethereum transactions, a blockheight, and an optional timestamp range over which the bundle is valid.
+
+```jsonld
 {
-    "signedTransactions": ['...'],
-    "blocknumber": "0x386526",
-    "minTimestamp": 12345, // optional
-    "maxTimestamp": 12345 // optional
+    "signedTransactions": ['...'], // RLP encoded signed transaction array
+    "blocknumber": "0x386526", // hex string
+    "minTimestamp": 12345, // optional uint64
+    "maxTimestamp": 12345 // optional uint64
 }
 ```
 
-MEV-geth miners select the most valuable bundle and place it at the beginning of the block template at the given blockheight. Miners determine the value of a bundle by adding how much ETH was sent to the coinbase to the amount of ETH spent on gas.
+The `signedTransactions` can be any valid ethereum transactions. Care must be taken to place transaction nonces in correct order.
 
-To submit a bundle, the searcher sends the bundle directly to the miner using the rpc method eth_sendBundle. In the near term, a public registry of trusted miners will be maintained by the flashbots core dev team.
+The `blocknumber` defines the block height at which the bundle is to be included. A bundle will only be evaluated for the provided blockheight and immediately evicted if not selected.
+
+The `minTimestamp` and `maxTimestamp` are optional conditions to further restrict bundle validity within a time range.
+
+MEV-Geth miners select the most profitable bundle per unit of gas used and place it at the beginning of the list of transactions of the block template at a given blockheight. Miners determine the value of a bundle based on the following equation. *Note, the change in block.coinbase balance represents a direct transfer of ETH through a smart contract.*
+
+<img width="544" src="https://hackmd.io/_uploads/Bk6iQmr5P.png">
+
+To submit a bundle, the searcher sends the bundle directly to the miner using the rpc method `eth_sendBundle`. Since MEV-Geth requires direct communication between searchers and miners, a searcher can configure the list of miners where they want to send their bundle.
+
+### How to use as a miner
+
+Miners can start mining MEV blocks by running MEV-Geth or by implementing their own fork that matches the specification.
+
+In order to start receiving bundles from searchers, miners will need to publish a [public https endpoint that exposes the `eth_sendBundle` RPC](https://github.com/flashbots/mev-relay-js).
+
+MEV-Geth is maintained by the Flashbots core dev team and [the source code can be found on github](https://github.com/flashbots/mev-geth).
+
+### Moving beyond proof of concept
+We provide the MEV-Geth proof of concept as a first milestone on the path to mitigating the negative externalities caused by MEV. We hope to discuss with the community the merits of adopting MEV-Geth in its current form. Our preliminary research indicates it could free at least 2.5% of the current chain congestion by eliminating the use of frontrunning and backrunning and provide uplift of up to 18% on miner rewards from Ethereum. That being said, we believe a sustainable solution to MEV existential risks requires complete privacy and finality, which the proof of concept does not address. We hope to engage community feedback throughout the development of this complete version of MEV-Geth.
