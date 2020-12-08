@@ -491,6 +491,11 @@ func (pool *TxPool) Pending() (map[common.Address]types.Transactions, error) {
 	return pending, nil
 }
 
+/// AllMevBundles returns all the MEV Bundles currently in the pool
+func (pool *TxPool) AllMevBundles() []mevBundle {
+	return pool.mevBundles
+}
+
 // MevBundles returns a list of bundles valid for the given blockNumber/blockTimestamp
 // also prunes bundles that are outdated
 func (pool *TxPool) MevBundles(blockNumber *big.Int, blockTimestamp uint64) ([]types.Transactions, error) {
