@@ -2007,3 +2007,56 @@ func benchmarkPoolBatchInsert(b *testing.B, size int, local bool) {
 		}
 	}
 }
+
+// MEV Bundle tests
+func TestBundles(t *testing.T) {
+	pool := TxPool{}
+	var empty types.Transactions
+	empty = append(empty, &types.Transaction{})
+
+	pool.AddMevBundle(empty, big.NewInt(0), 0, 0)
+	pool.AddMevBundle(empty, big.NewInt(0), 0, 0)
+	pool.AddMevBundle(empty, big.NewInt(0), 0, 0)
+	pool.AddMevBundle(empty, big.NewInt(9), 0, 0)
+	pool.AddMevBundle(empty, big.NewInt(9), 0, 0)
+	pool.AddMevBundle(empty, big.NewInt(12), 0, 0)
+	pool.AddMevBundle(empty, big.NewInt(15), 0, 0)
+
+	// too early, everything rolls over except for the 0 block
+	res, _ := pool.MevBundles(big.NewInt(8), 10)
+	if len(res) != 3 {
+		t.Fatal("only expected immediate inclusion bundles")
+	}
+	if len(pool.mevBundles) != 4 {
+		t.Fatal("did not roll over bundles")
+	}
+
+	// returns & prunes the ones in time
+	res, _ = pool.MevBundles(big.NewInt(9), 10)
+	if len(res) != 2 {
+		t.Fatal("did not get the correct number fo bundles")
+	}
+	if len(pool.mevBundles) != 2 {
+		t.Fatal("did not roll over & prune")
+	}
+
+	// adds a bundle which has a min/max timestamp
+	pool.AddMevBundle(empty, big.NewInt(10), 5, 7)
+	res, _ = pool.MevBundles(big.NewInt(10), 8)
+	if len(res) != 0 {
+		t.Fatal("did not expect to get a bundle here since it is outdated")
+	}
+	if len(pool.mevBundles) != 2 {
+		t.Fatal("did not roll over & prune")
+	}
+
+	// zero target block bundles get returned
+	pool.AddMevBundle(empty, big.NewInt(10), 5, 7)
+	res, _ = pool.MevBundles(big.NewInt(10), 8)
+	if len(res) != 0 {
+		t.Fatal("did not expect to get a bundle here since it is outdated")
+	}
+	if len(pool.mevBundles) != 2 {
+		t.Fatal("did not roll over & prune")
+	}
+}

@@ -497,19 +497,31 @@ func (pool *TxPool) MevBundles(blockNumber *big.Int, blockTimestamp uint64) ([]t
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
+	// returned values
 	var txBundles []types.Transactions
+	// rolled over values
 	var bundles []mevBundle
+
 	for _, bundle := range pool.mevBundles {
+		// Bundles with `0` as the target block should be queued immediately
+		if bundle.blockNumber.Cmp(big.NewInt(0)) == 0 {
+			txBundles = append(txBundles, bundle.txs)
+			continue
+		}
+
+		// Prune outdated bundles
 		if (bundle.maxTimestamp != 0 && blockTimestamp > bundle.maxTimestamp) || blockNumber.Cmp(bundle.blockNumber) > 0 {
 			continue
 		}
+
+		// Roll over future bundles
 		if (bundle.minTimestamp != 0 && blockTimestamp < bundle.minTimestamp) || blockNumber.Cmp(bundle.blockNumber) < 0 {
-			// still include the bundle for the future, since this is for an upcoming block
 			bundles = append(bundles, bundle)
 			continue
 		}
+
+		// return the ones which are in time
 		txBundles = append(txBundles, bundle.txs)
-		bundles = append(bundles, bundle)
 	}
 
 	pool.mevBundles = bundles
