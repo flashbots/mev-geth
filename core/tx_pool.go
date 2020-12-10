@@ -508,12 +508,6 @@ func (pool *TxPool) MevBundles(blockNumber *big.Int, blockTimestamp uint64) ([]t
 	var bundles []mevBundle
 
 	for _, bundle := range pool.mevBundles {
-		// Bundles with `0` as the target block should be queued immediately
-		if bundle.blockNumber.Cmp(big.NewInt(0)) == 0 {
-			txBundles = append(txBundles, bundle.txs)
-			continue
-		}
-
 		// Prune outdated bundles
 		if (bundle.maxTimestamp != 0 && blockTimestamp > bundle.maxTimestamp) || blockNumber.Cmp(bundle.blockNumber) > 0 {
 			continue
