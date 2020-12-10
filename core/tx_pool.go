@@ -521,6 +521,8 @@ func (pool *TxPool) MevBundles(blockNumber *big.Int, blockTimestamp uint64) ([]t
 
 		// return the ones which are in time
 		txBundles = append(txBundles, bundle.txs)
+		// keep the bundles around internally until they need to be pruned
+		bundles = append(bundles, bundle)
 	}
 
 	pool.mevBundles = bundles
