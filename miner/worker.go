@@ -784,12 +784,14 @@ func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Addres
 	w.current.txs = append(w.current.txs, tx)
 	w.current.receipts = append(w.current.receipts, receipt)
 
+	// coinbase balance difference already contains gas fee
 	if trackProfit {
 		finalBalance := w.current.state.GetBalance(w.coinbase)
 		w.current.profit.Add(w.current.profit, big.NewInt(0).Sub(finalBalance, initialBalance))
+	} else {
+		gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+		w.current.profit.Add(w.current.profit, gasUsed.Mul(gasUsed, tx.GasPrice()))
 	}
-	gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
-	w.current.profit.Add(w.current.profit, gasUsed.Mul(gasUsed, tx.GasPrice()))
 
 	return receipt.Logs, nil
 }
@@ -1188,7 +1190,9 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 func (w *worker) findMostProfitableBundle(bundles []types.Transactions, coinbase common.Address, parent *types.Block, header *types.Header) (types.Transactions, *big.Int) {
 	maxBundlePrice := big.NewInt(0)
 	maxBundle := types.Transactions{}
-	for _, bundle := range bundles {
+	//for _, bundle := range bundles {  // bundle would always be the last one of bundles at last
+	for i := range bundles {
+		bundle := bundles[i]
 		if len(bundle) == 0 {
 			continue
 		}
@@ -1226,10 +1230,10 @@ func (w *worker) computeBundleGas(bundle types.Transactions, parent *types.Block
 			return nil, err
 		}
 		totalGasUsed += receipt.GasUsed
-		gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
-		ethSpent := gasUsed.Mul(gasUsed, tx.GasPrice())
+		//gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+		//ethSpent := gasUsed.Mul(gasUsed, tx.GasPrice())
 
-		totalEth.Add(totalEth, ethSpent)
+		//totalEth.Add(totalEth, ethSpent) // coinbase balance difference already contains gas fee
 	}
 	coinbaseBalanceAfter := env.state.GetBalance(w.coinbase)
 	coinbaseDiff := coinbaseBalanceAfter.Sub(coinbaseBalanceAfter, coinbaseBalanceBefore)
