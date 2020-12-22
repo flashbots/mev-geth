@@ -791,7 +791,7 @@ func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Addres
 	// coinbase balance difference already contains gas fee
 	if trackProfit {
 		finalBalance := w.current.state.GetBalance(w.coinbase)
-		w.current.profit.Add(w.current.profit, big.NewInt(0).Sub(finalBalance, initialBalance))
+		w.current.profit.Add(w.current.profit, new(big.Int).Sub(finalBalance, initialBalance))
 	} else {
 		gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
 		w.current.profit.Add(w.current.profit, gasUsed.Mul(gasUsed, tx.GasPrice()))
@@ -1138,8 +1138,8 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			log.Error("Failed to fetch pending transactions", "err", err)
 			return
 		}
-		maxBundle, bundlePrice := w.findMostProfitableBundle(bundles, w.coinbase, parent, header)
-		log.Info("Flashbots bundle", "bundlePrice", bundlePrice, "bundleLength", len(maxBundle))
+		maxBundle, bundlePrice, ethToCoinbase, gasUsed := w.findMostProfitableBundle(bundles, w.coinbase, parent, header)
+		log.Info("Flashbots bundle", "ethToCoinbase", ethToCoinbase, "gasUsed", gasUsed, "bundlePrice", bundlePrice, "bundleLength", len(maxBundle))
 		if w.commitBundle(maxBundle, w.coinbase, interrupt) {
 			return
 		}
@@ -1191,16 +1191,19 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 	return nil
 }
 
-func (w *worker) findMostProfitableBundle(bundles []types.Transactions, coinbase common.Address, parent *types.Block, header *types.Header) (types.Transactions, *big.Int) {
-	maxBundlePrice := big.NewInt(0)
+func (w *worker) findMostProfitableBundle(bundles []types.Transactions, coinbase common.Address, parent *types.Block, header *types.Header) (types.Transactions, *big.Int, *big.Int, uint64) {
+	maxBundlePrice := new(big.Int)
+	maxTotalEth := new(big.Int)
+	var maxTotalGasUsed uint64
 	maxBundle := types.Transactions{}
-	//for _, bundle := range bundles {  // bundle would always be the last one of bundles at last
-	for i := range bundles {
-		bundle := bundles[i]
+	for _, bundle := range bundles {
 		if len(bundle) == 0 {
 			continue
 		}
-		mevGasPrice, err := w.computeBundleGas(bundle, parent, header)
+		totalEth, totalGasUsed, err := w.computeBundleGas(bundle, parent, header)
+
+		mevGasPrice := new(big.Int).Div(totalEth, new(big.Int).SetUint64(totalGasUsed))
+
 		if err != nil {
 			log.Warn("Error computing gas for a bundle", "error", err)
 			continue
@@ -1208,22 +1211,23 @@ func (w *worker) findMostProfitableBundle(bundles []types.Transactions, coinbase
 		if mevGasPrice.Cmp(maxBundlePrice) > 0 {
 			maxBundle = bundle
 			maxBundlePrice = mevGasPrice
+			maxTotalEth = totalEth
+			maxTotalGasUsed = totalGasUsed
 		}
 	}
 
-	return maxBundle, maxBundlePrice
+	return maxBundle, maxBundlePrice, maxTotalEth, maxTotalGasUsed
 }
 
 // Compute the adjusted gas price for a whole bundle
 // Done by calculating all gas spent, adding transfers to the coinbase, and then dividing by gas used
-func (w *worker) computeBundleGas(bundle types.Transactions, parent *types.Block, header *types.Header) (*big.Int, error) {
+func (w *worker) computeBundleGas(bundle types.Transactions, parent *types.Block, header *types.Header) (*big.Int, uint64, error) {
 	env, err := w.generateEnv(parent, header)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	var totalGasUsed uint64 = 0
-	totalEth := big.NewInt(0)
 	var tempGasUsed uint64
 
 	coinbaseBalanceBefore := env.state.GetBalance(w.coinbase)
@@ -1231,21 +1235,16 @@ func (w *worker) computeBundleGas(bundle types.Transactions, parent *types.Block
 	for _, tx := range bundle {
 		receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &w.coinbase, env.gasPool, env.state, env.header, tx, &tempGasUsed, *w.chain.GetVMConfig())
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		totalGasUsed += receipt.GasUsed
-		//gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
-		//ethSpent := gasUsed.Mul(gasUsed, tx.GasPrice())
-
-		//totalEth.Add(totalEth, ethSpent) // coinbase balance difference already contains gas fee
 	}
 	coinbaseBalanceAfter := env.state.GetBalance(w.coinbase)
-	coinbaseDiff := coinbaseBalanceAfter.Sub(coinbaseBalanceAfter, coinbaseBalanceBefore)
+	coinbaseDiff := new(big.Int).Sub(coinbaseBalanceAfter, coinbaseBalanceBefore)
+	totalEth := new(big.Int)
 	totalEth.Add(totalEth, coinbaseDiff)
 
-	gasPrice := totalEth.Div(totalEth, new(big.Int).SetUint64(totalGasUsed))
-
-	return gasPrice, nil
+	return totalEth, totalGasUsed, nil
 }
 
 // copyReceipts makes a deep copy of the given receipts.
