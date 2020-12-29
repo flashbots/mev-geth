@@ -1202,12 +1202,12 @@ func (w *worker) findMostProfitableBundle(bundles []types.Transactions, coinbase
 		}
 		totalEth, totalGasUsed, err := w.computeBundleGas(bundle, parent, header)
 
-		mevGasPrice := new(big.Int).Div(totalEth, new(big.Int).SetUint64(totalGasUsed))
-
 		if err != nil {
 			log.Warn("Error computing gas for a bundle", "error", err)
 			continue
 		}
+
+		mevGasPrice := new(big.Int).Div(totalEth, new(big.Int).SetUint64(totalGasUsed))
 		if mevGasPrice.Cmp(maxBundlePrice) > 0 {
 			maxBundle = bundle
 			maxBundlePrice = mevGasPrice
