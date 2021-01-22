@@ -85,6 +85,13 @@ In order to start receiving bundles from searchers, miners will need to publish 
 
 MEV-Geth is maintained by the Flashbots core dev team and [the source code can be found on github](https://github.com/flashbots/mev-geth).
 
+#### Patch diff
+
+If you're just interested in seeing the diff as a patch, run the following:
+```
+git diff -p v1.9.25..origin/release/v1.9.25
+```
+
 ### How to use as a searcher
 
 A searcher's job is to monitor the Ethereum state and transaction pool for MEV opportunities and produce transaction bundles that extract that MEV. Anyone can become a searcher. In fact, the bundles produced by searchers don't need to extract MEV at all, but we expect the most valuable bundles will. An MEV-Geth bundle is a standard message template composed of an array of valid ethereum transactions, a blockheight, and an optional timestamp range over which the bundle is valid.
