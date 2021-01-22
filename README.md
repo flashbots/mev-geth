@@ -31,22 +31,22 @@ We believe that without the adoption of neutral, public, open-source infrastruct
 
 ### Design goals
 
-- **Permissionless**  
-A permissionless design implies there are no trusted intermediary which can censor transactions. 
-- **Efficient**  
+- **Permissionless**
+A permissionless design implies there are no trusted intermediary which can censor transactions.
+- **Efficient**
 An efficient design implies MEV extraction is performed without causing unnecessary network or chain congestion.
-- **Pre-trade privacy**  
+- **Pre-trade privacy**
 Pre-trade privacy implies transactions only become publicly known after they have been included in a block. Note, this type of privacy does not exclude privileged actors such as transaction aggregators / gateways / miners.
-- **Failed trade privacy**  
+- **Failed trade privacy**
 Failed trade privacy implies loosing bids are never included in a block, thus never exposed to the public. Failed trade privacy is tightly coupled to extraction efficiency.
-- **Complete privacy**  
+- **Complete privacy**
 Complete privacy implies there are no privileged actors such as transaction aggregators / gateways / miners who can observe incoming transactions.
-- **Finality**  
+- **Finality**
 Finality implies it is infeasible for MEV extraction to be reversed once included in a block. This would protect against time-bandit chain re-org attacks.
 
 The MEV-Geth proof of concept relies on the fact that searchers can withhold bids from certain miners in order to disincentivize bad behavior like stealing a profitable strategy. We expect a complete privacy design to necessitate some sort of private computation solution like SGX, ZKP, or MPC to withhold the transaction content from miners until it is mined in a block. One of the core objective of the Flashbots organization is to incentivize and produce research in this direction.
 
-The MEV-Geth proof of concept does not provide any finality guarantees. We expect the solution to this problem to require post-trade execution privacy through private chain state or strong economic infeasibility. The design of a system with strong finality is the second core objective of the MEV-Geth research effort. 
+The MEV-Geth proof of concept does not provide any finality guarantees. We expect the solution to this problem to require post-trade execution privacy through private chain state or strong economic infeasibility. The design of a system with strong finality is the second core objective of the MEV-Geth research effort.
 
 ### How it works
 
