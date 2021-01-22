@@ -2001,7 +2001,7 @@ func NewBundleAPI(b Backend) *BundleAPI {
 
 // CallBundle will simulate a bundle of transactions at the top of a block.
 // The sender is responsible for signing the transactions and using the correct nonce and ensuring validity
-func (s *BundleAPI) CallBundle(ctx context.Context, encodedTxs []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash, blockTimestamp *uint64) ([]hexutil.Bytes, error) {
+func (s *BundleAPI) CallBundle(ctx context.Context, encodedTxs []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash, blockTimestamp *uint64) ([]map[string]interface{}, error) {
 	if len(encodedTxs) == 0 {
 		return nil, nil
 	}
@@ -2068,7 +2068,7 @@ func (s *BundleAPI) CallBundle(ctx context.Context, encodedTxs []hexutil.Bytes, 
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64)
 
-	results := []hexutil.Bytes{}
+	results := []map[string]interface{}{}
 	for _, tx := range txs {
 		msg, err := tx.AsMessage(signer)
 		if err != nil {
@@ -2085,10 +2085,16 @@ func (s *BundleAPI) CallBundle(ctx context.Context, encodedTxs []hexutil.Bytes, 
 		if err != nil {
 			return nil, fmt.Errorf("err: %w; supplied gas %d; txhash %s", err, msg.Gas(), tx.Hash())
 		}
-		if result.Err != nil {
-			return nil, fmt.Errorf("err in tx: %w; supplied gas %d; txhash %s", result.Err, msg.Gas(), tx.Hash())
+		jsonResult := map[string]interface{}{
+			"txHash": tx.Hash().String(),
 		}
-		results = append(results, result.Return())
+
+		if result.Err != nil {
+			jsonResult["error"] = result.Err.Error()
+		} else {
+			jsonResult["value"] = common.BytesToHash(result.Return())
+		}
+		results = append(results, jsonResult)
 	}
 	return results, nil
 }
