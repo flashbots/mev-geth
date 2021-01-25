@@ -101,7 +101,8 @@ type task struct {
 	block     *types.Block
 	createdAt time.Time
 
-	profit *big.Int
+	profit      *big.Int
+	isFlashbots bool
 }
 
 const (
@@ -599,7 +600,7 @@ func (w *worker) taskLoop() {
 			// Interrupt previous sealing operation
 			interrupt()
 			stopCh, prev = make(chan struct{}), sealHash
-			log.Info("Proposed miner block", "blockNumber", prevNumber, "profit", prevProfit)
+			log.Info("Proposed miner block", "blockNumber", prevNumber, "profit", prevProfit, "isFlashbots", task.isFlashbots)
 			if w.skipSealHook != nil && w.skipSealHook(task) {
 				continue
 			}
@@ -1174,12 +1175,13 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 			interval()
 		}
 		select {
-		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now(), profit: w.current.profit}:
+		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now(), profit: w.current.profit, isFlashbots: w.flashbots.isFlashbots}:
 			w.unconfirmed.Shift(block.NumberU64() - 1)
 			log.Info("Commit new mining work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
 				"uncles", len(uncles), "txs", w.current.tcount,
 				"gas", block.GasUsed(), "fees", totalFees(block, receipts),
-				"elapsed", common.PrettyDuration(time.Since(start)))
+				"elapsed", common.PrettyDuration(time.Since(start)),
+				"isFlashbots", w.flashbots.isFlashbots)
 
 		case <-w.exitCh:
 			log.Info("Worker has exited")
