@@ -45,6 +45,7 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/tyler-smith/go-bip39"
+	"golang.org/x/crypto/sha3"
 )
 
 // PublicEthereumAPI provides an API to access Ethereum related information.
@@ -1999,9 +2000,13 @@ func NewBundleAPI(b Backend) *BundleAPI {
 	return &BundleAPI{b}
 }
 
-// CallBundle will simulate a bundle of transactions at the top of a block.
-// The sender is responsible for signing the transactions and using the correct nonce and ensuring validity
-func (s *BundleAPI) CallBundle(ctx context.Context, encodedTxs []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash, blockTimestamp *uint64) ([]map[string]interface{}, error) {
+// CallBundle will simulate a bundle of transactions at the top of a given block
+// number with the state of another (or the same) block. This can be used to
+// simulate future blocks with the current state, or it can be used to simulate
+// a past block.
+// The sender is responsible for signing the transactions and using the correct
+// nonce and ensuring validity
+func (s *BundleAPI) CallBundle(ctx context.Context, encodedTxs []hexutil.Bytes, blockNr rpc.BlockNumber, stateBlockNumberOrHash rpc.BlockNumberOrHash, blockTimestamp *uint64, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
 	if len(encodedTxs) == 0 {
 		return nil, nil
 	}
@@ -2016,23 +2021,29 @@ func (s *BundleAPI) CallBundle(ctx context.Context, encodedTxs []hexutil.Bytes, 
 	}
 	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
-	timeout := time.Second * 5 // TODO make an arg
-	state, parent, err := s.b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+	timeoutMilliSeconds := int64(5000)
+	if timeoutMilliSecondsPtr != nil {
+		timeoutMilliSeconds = *timeoutMilliSecondsPtr
+	}
+	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
+	state, parent, err := s.b.StateAndHeaderByNumberOrHash(ctx, stateBlockNumberOrHash)
 	if state == nil || err != nil {
 		return nil, err
 	}
-	blockNumber := new(big.Int).Add(parent.Number, common.Big1)
+	blockNumber := big.NewInt(int64(blockNr))
 
 	timestamp := parent.Time
 	if blockTimestamp != nil {
 		timestamp = *blockTimestamp
 	}
+	coinbase := parent.Coinbase
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     blockNumber,
-		GasLimit:   parent.GasLimit, // TODO make an arg
+		GasLimit:   parent.GasLimit,
 		Time:       timestamp,
 		Difficulty: parent.Difficulty,
+		Coinbase:   coinbase,
 	}
 
 	// Setup context so it may be cancelled the call has completed
@@ -2069,6 +2080,9 @@ func (s *BundleAPI) CallBundle(ctx context.Context, encodedTxs []hexutil.Bytes, 
 	gp := new(core.GasPool).AddGas(math.MaxUint64)
 
 	results := []map[string]interface{}{}
+	coinbaseBalanceBefore := evm.StateDB.GetBalance(coinbase)
+
+	bundleHash := sha3.NewLegacyKeccak256()
 	for _, tx := range txs {
 		msg, err := tx.AsMessage(signer)
 		if err != nil {
@@ -2085,16 +2099,25 @@ func (s *BundleAPI) CallBundle(ctx context.Context, encodedTxs []hexutil.Bytes, 
 		if err != nil {
 			return nil, fmt.Errorf("err: %w; supplied gas %d; txhash %s", err, msg.Gas(), tx.Hash())
 		}
-		jsonResult := map[string]interface{}{
-			"txHash": tx.Hash().String(),
-		}
 
+		txHash := tx.Hash().String()
+		jsonResult := map[string]interface{}{
+			"txHash":  txHash,
+			"gasUsed": result.UsedGas,
+		}
+		bundleHash.Write(tx.Hash().Bytes())
 		if result.Err != nil {
 			jsonResult["error"] = result.Err.Error()
 		} else {
 			jsonResult["value"] = common.BytesToHash(result.Return())
 		}
+
 		results = append(results, jsonResult)
 	}
-	return results, nil
+
+	ret := map[string]interface{}{}
+	ret["results"] = results
+	ret["coinbaseDiff"] = new(big.Int).Sub(evm.StateDB.GetBalance(coinbase), coinbaseBalanceBefore).String()
+	ret["bundleHash"] = "0x" + common.Bytes2Hex(bundleHash.Sum(nil))
+	return ret, nil
 }
