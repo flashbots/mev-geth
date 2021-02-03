@@ -81,9 +81,10 @@ An in-depth list of the changes can be seen by inspecting the [diff](https://git
 
 Miners can start mining MEV blocks by running MEV-Geth or by implementing their own fork that matches the specification.
 
-In order to start receiving bundles from searchers, miners will need to publish a [public https endpoint that exposes the `eth_sendBundle` RPC](https://github.com/flashbots/mev-relay-js).
+In order to start receiving bundles from searchers, miners will need to publish a [public https endpoint that exposes the `eth_sendBundle` RPC](https://github.com/flashbots/mev-relay-js). 
 
 MEV-Geth is maintained by the Flashbots core dev team and [the source code can be found on github](https://github.com/flashbots/mev-geth).
+
 
 #### Patch diff
 
@@ -91,6 +92,15 @@ If you're just interested in seeing the diff as a patch, run the following:
 ```
 git diff -p v1.9.25..origin/release/v1.9.25
 ```
+
+### Onboard [Flashbots Alpha](https://github.com/flashbots/pm#flashbots-alpha) as a mining pool
+
+If you are a miner and/or mining pool, we invite you to try Flashbots during this Alpha phase and start receiving MEV revenue by following these 4 steps:
+
+1. Fill out this [form](https://forms.gle/78JS52d22dwrgabi6) to indicate your interest in participating in the Alpha and be added to the MEV-relay miner registry. 
+2. You will receive an onboarding email from Flashbots to help [set up](https://github.com/flashbots/mev-geth/blob/master/README.md#quick-start) your MEV-geth node and protect it with a [reverse proxy](https://github.com/flashbots/mev-relay-js/blob/master/miner/proxy.js). 
+3. Respond to Flashbots' email with your MEV-geth node RPC endpoint to be added to the MEV-relay gateway. 
+4. After receiving a confirmation email that your MEV-geth node's endpoint has been added to the relay, you will immediately start receiving Flashbots transaction bundles with associated MEV revenue paid to you.
 
 ### How to use as a searcher
 
