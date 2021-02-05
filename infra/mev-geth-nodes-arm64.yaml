@@ -48,6 +48,10 @@ Parameters:
     Type: String
     Default: m6gd.large
 
+  MemoryLimit:
+    Type: Number
+    Default: 6144
+
   KeyPair:
     Type: AWS::EC2::KeyPair::KeyName
 
@@ -152,6 +156,8 @@ Metadata:
         default: "VPC CIDR Block"
       InstanceType:
         default: "Which instance type should we use to build the ECS cluster?"
+      MemoryLimit:
+        default: "How much memory should be reserved for each task. Set to greater than 50% of instance memory capacity."
       KeyPair:
         default: "Which keypair should be used to allow SSH to the nodes?"
       ClusterSize:
@@ -198,6 +204,7 @@ Metadata:
           default: ECS Configuration
         Parameters:
           - InstanceType
+          - MemoryLimit
           - KeyPair
           - SpotPrice
           - ClusterSize
@@ -299,7 +306,7 @@ Resources:
         Timeout: PT15M
     UpdatePolicy:
       AutoScalingRollingUpdate:
-        MinInstancesInService: 4
+        MinInstancesInService: 2
         MaxBatchSize: 1
         PauseTime: PT15M
         SuspendProcesses:
@@ -654,7 +661,7 @@ Resources:
         - Name: !Ref NodeTaskName
           Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${NodeRepository}
           Essential: true
-          MemoryReservation: 6144
+          MemoryReservation: !Ref MemoryLimit
           Environment:
             - Name: "region"
               Value: !Ref AWS::Region
