@@ -58,10 +58,19 @@ The MEV-Geth proof of concept is compatible with any regular Ethereum client. Th
 
 ### What is the difference between MEV-Geth and geth
 
-An in-depth list of the changes can be seen by inspecting the [diff](https://github.com/ethereum/go-ethereum/compare/master...flashbots:master#diff-c426ecd2f7d247753b9ea8c1cc003f21fa412661c1f967d203d4edf8163da344R1970). Summary below:
+The patch is broken down into three modules:
+1. bundle worker and `eth_sendBundle` rpc ([8104d5d7b0a54bd98b3a08479a1fde685eb53c29](https://github.com/flashbots/mev-geth/commit/8104d5d7b0a54bd98b3a08479a1fde685eb53c29) and [c2b5b4029b2b748a6f1a9d5668f12096f096563d](https://github.com/flashbots/mev-geth/commit/c2b5b4029b2b748a6f1a9d5668f12096f096563d))
+2. profit switcher ([aa5840d22f4882f91ecba0eb20ef35a702b134d5](https://github.com/flashbots/mev-geth/commit/aa5840d22f4882f91ecba0eb20ef35a702b134d5))
+3. `eth_callBundle` simulation rpc ([9199d2e13d484df7a634fad12343ed2b46d5d4c3](https://github.com/flashbots/mev-geth/commit/9199d2e13d484df7a634fad12343ed2b46d5d4c3) and [a99dfc198817dd171128cc22439c81896e876619](https://github.com/flashbots/mev-geth/commit/a99dfc198817dd171128cc22439c81896e876619))
+
+While only the bundle worker and `eth_sendBundle` module is necessary to mine flashbots blocks, we recommend also running the profit switcher module to guarantee mining rewards are maximized. The `eth_callBundle` simulation rpc module is not needed for the alpha.
+
+An in-depth list of the changes can be seen by inspecting the [diff](https://github.com/ethereum/go-ethereum/compare/master...flashbots:master). 
+
+In summary:
 
 - Modify Geth’s txpool to also contain a `mevBundles` field, which stores a list of MEV bundles. Each MEV bundle is an array of transactions, along with a min/max timestamp for their inclusion.
-- A new eth_sendBundle API is exposed which allows adding an MEV Bundle to the txpool. This is called by traders.
+- A new `eth_sendBundle` API is exposed which allows adding an MEV Bundle to the txpool. During the Flashbots Alpha, this is only called by MEV-relay.
   - The transactions submitted to the bundle are “eth_sendRawTransaction-style” RLP encoded signed transactions along with the min/max block of inclusion
   - This API is a no-op when run in light mode
 - Geth’s miner is modified as follows:
@@ -69,7 +78,7 @@ An in-depth list of the changes can be seen by inspecting the [diff](https://git
     - Finds the most profitable bundle
       - It picks the most profitable bundle by returning the one with the highest average gas price per unit of gas
         - computeBundleGas: Returns average gas price (\sum{gasprice_i*gasused_i + (coinbase_after - coinbase_before)) / \sum{gasused_i})
-    - Commits the bundle(remember: Bundle transactions are not ordered by nonce or gas price). For each transaction in the bundle, it:
+    - Commits the bundle (remember: Bundle transactions are not ordered by nonce or gas price). For each transaction in the bundle, it:
         - `Prepare`’s it against the state
         - CommitsTransaction with trackProfit = true
             w.current.profit += coinbase_after_tx - coinbase_before_tx
@@ -81,7 +90,7 @@ An in-depth list of the changes can be seen by inspecting the [diff](https://git
 
 Miners can start mining MEV blocks by running MEV-Geth or by implementing their own fork that matches the specification.
 
-In order to start receiving bundles during the Flashbots Alpha, miners will need to publish a public https endpoint that exposes the `eth_sendBundle` RPC and request to be added to the mev-relay service.
+To start receiving flashbots bundles from users, the miner needs to set a [reverse proxy](https://github.com/flashbots/mev-relay-js/blob/master/miner/proxy.js) to open their `eth_sendBundle` rpc and request to be whitelisted on the Flashbots hosted gateway called [MEV-relay](https://github.com/flashbots/mev-relay-js). MEV-relay is needed during the alpha to aggregate bundle requests from all users, prevent spam and DOS attacks on participating miner(s)/mining pool(s), and collect necessary system health metrics.
 
 #### Patch diff
 
@@ -94,9 +103,9 @@ git diff -p v1.9.25..origin/release/v1.9.25
 
 If you are a miner and/or mining pool, we invite you to try Flashbots during this Alpha phase and start receiving MEV revenue by following these 4 steps:
 
-1. Fill out this [form](https://forms.gle/78JS52d22dwrgabi6) to indicate your interest in participating in the Alpha and be added to the MEV-relay miner registry. 
-2. You will receive an onboarding email from Flashbots to help [set up](https://github.com/flashbots/mev-geth/blob/master/README.md#quick-start) your MEV-geth node and protect it with a [reverse proxy](https://github.com/flashbots/mev-relay-js/blob/master/miner/proxy.js). 
-3. Respond to Flashbots' email with your MEV-geth node RPC endpoint to be added to the MEV-relay gateway. 
+1. Fill out this [form](https://forms.gle/78JS52d22dwrgabi6) to indicate your interest in participating in the Alpha and be added to the MEV-relay miner whitelist. 
+2. You will receive an onboarding email from Flashbots to help [set up](https://github.com/flashbots/mev-geth/blob/master/README.md#quick-start) your MEV-geth node and protect it with a reverse proxy. 
+3. Respond to Flashbots' email with your MEV-geth node endpoint to be added to the MEV-relay gateway. 
 4. After receiving a confirmation email that your MEV-geth node's endpoint has been added to the relay, you will immediately start receiving Flashbots transaction bundles with associated MEV revenue paid to you.
 
 ### How to use as a searcher
