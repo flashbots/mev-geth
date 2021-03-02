@@ -58,7 +58,7 @@ MEV-Geth introduces the concepts of "searchers", "transaction bundles", and "blo
 
 The MEV-Geth proof of concept is compatible with any regular Ethereum client. The Flashbots core devs are maintaining [a reference implementation](https://github.com/flashbots/mev-geth) for the go-ethereum client.
 
-### Differences between MEV-Geth and [vanilla_ geth](https://github.com/ethereum/go-ethereum)
+### Differences between MEV-Geth and [_vanilla_ geth](https://github.com/ethereum/go-ethereum)
 
 The entire patch can be broken down into four modules:
 
@@ -140,7 +140,7 @@ To submit a bundle, the searcher sends the bundle directly to the miner using th
 
 ### Feature requests and bug reports
 
-If you are a user of MEV-Geth and have suggestions on how to make integration with your current setup easier, or would like to submit a bug report, we encourage you to open an issue in this repository with the `enhancement` or `bug` labels respectively. If you need help getting started, please ask in the dedicated [#miners](https://discord.gg/rcgADN9qFX) channel in our Discord.
+If you are a user of MEV-Geth and have suggestions on how to make integration with your current setup easier, or would like to submit a bug report, we encourage you to open an issue in this repository with the `enhancement` or `bug` labels respectively. If you need help getting started, please ask in the dedicated [#⛏️miners](https://discord.gg/rcgADN9qFX) channel in our Discord.
 
 ### Moving beyond proof of concept
 
