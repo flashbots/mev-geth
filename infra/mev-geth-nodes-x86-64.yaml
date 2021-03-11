@@ -81,7 +81,7 @@ Parameters:
 
   ECSAMI:
     Type: AWS::SSM::Parameter::Value<String>
-    Default: /aws/service/ecs/optimized-ami/amazon-linux/recommended/image_id
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
 
 # SNS Parameters
 
