@@ -72,6 +72,7 @@ kill_node() {
     tries=0
     while [ ! -z `ps -ef |grep geth|grep -v geth-updater|grep -v grep|awk '{print $1}'` ]
     do
+        ps -ef |grep geth|grep -v geth-updater|grep -v grep
         pid=`ps -ef |grep geth|grep -v geth-updater|grep -v grep|awk '{print $1}'`
         kill $pid
         sleep 30
@@ -80,6 +81,7 @@ kill_node() {
         if [ $tries -gt 29 ]
         then
             echo "Node has not stopped cleanly after $tries, forcibly killing."
+            ps -ef |grep geth|grep -v geth-updater|grep -v grep
             pid=`ps -ef |grep geth|grep -v geth-updater|grep -v grep|awk '{print $1}'`
             kill -9 $pid
         fi
