@@ -570,7 +570,7 @@ func (w *worker) taskLoop() {
 		stopCh chan struct{}
 		prev   common.Hash
 
-		prevParentHash string
+		prevParentHash common.Hash
 		prevProfit     *big.Int
 	)
 
@@ -593,7 +593,7 @@ func (w *worker) taskLoop() {
 				continue
 			}
 
-			taskParentHash := task.block.Header().ParentHash.Hex()
+			taskParentHash := task.block.Header().ParentHash
 			// reject new tasks which don't profit
 			if taskParentHash == prevParentHash &&
 				prevProfit != nil && task.profit.Cmp(prevProfit) < 0 {
