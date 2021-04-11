@@ -1257,6 +1257,11 @@ func (w *worker) mergeBundles(bundles []simulatedBundle, parent *types.Block, he
 
 	count := 0
 	for _, bundle := range bundles {
+		if bundle.mevGasPrice.Cmp(tailGasPrice) < 0 {
+			// exit loop early when bundles are no longer above tail gas
+			break
+		}
+
 		prevState = state.Copy()
 		prevGasPool = new(core.GasPool).AddGas(gasPool.Gas())
 
