@@ -17,14 +17,18 @@
 package core
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"math/big"
+	"net/http"
+	"net/url"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -32,6 +36,9 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/gorilla/websocket"
 )
 
 const (
@@ -211,6 +218,116 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 	return conf
 }
 
+// Connection to receive bundles from the relay via websocket
+// From Gorilla websocket docs:
+//   Connections support one concurrent reader and one concurrent writer.
+type wsConn struct {
+	conn        *websocket.Conn
+	wsConnected bool
+	rlock       sync.Mutex
+	wlock       sync.Mutex
+}
+
+type relayAbstractMessage struct {
+	Data *json.RawMessage `json:"data"`
+	Type string           `json:"type"`
+}
+
+type relaySuccessMessage struct {
+	Data string `json:"data"`
+	Type string `json:"type"`
+}
+
+type relayBundleMessage struct {
+	Data bundleData `json:"data"`
+	Type string     `json:"type"`
+}
+
+type bundleData struct {
+	EncodedTxs   []hexutil.Bytes `json:"encodedTxs"`
+	BlockNumber  rpc.BlockNumber `json:"blockNumber"`
+	MinTimestamp uint64          `json:"minTimestamp"`
+	MaxTimestamp uint64          `json:"maxTimestamp"`
+}
+
+// WriteJSON wraps corresponding method on the websocket but is safe for concurrent calling
+func (wsConnection *wsConn) WriteMessage(messageType int, data []byte) error {
+	wsConnection.wlock.Lock()
+	defer wsConnection.wlock.Unlock()
+
+	return wsConnection.conn.WriteMessage(messageType, data)
+}
+
+// ReadMessage wraps corresponding method on the websocket but is safe for concurrent calling
+func (wsConnection *wsConn) ReadMessage() (int, string, error) {
+	wsConnection.rlock.Lock()
+	defer wsConnection.rlock.Unlock()
+
+	messageType, message, err := wsConnection.conn.ReadMessage()
+	return messageType, string(message), err
+}
+
+// Close wraps corresponding method on the websocket but is safe for concurrent calling
+func (wsConnection *wsConn) Close() error {
+	// The Close and WriteControl methods can be called concurrently with all other methods,
+	// so the mutex is not used here
+	return wsConnection.conn.Close()
+}
+
+// Go routine that looks for messages from the relay
+func (pool *TxPool) readWSMessages() {
+	for {
+		messageType, message, err := pool.wsConnection.ReadMessage()
+		if err != nil {
+			if messageType == -1 { // message type emitted when relay ws connection is closed
+				log.Error("ws connection with relay closed")
+				pool.wsConnection.wlock.Lock()
+				defer pool.wsConnection.wlock.Unlock()
+				pool.wsConnection.wsConnected = false
+				// attempt reconnection here, TODO
+			} else {
+				log.Error("ws error while reading the message: ", err.Error(), messageType)
+			}
+			return
+		}
+		var abstractMessage relayAbstractMessage
+		if err := json.Unmarshal([]byte(message), &abstractMessage); err != nil {
+			log.Error("Error while decoding json message: ", err.Error(), nil)
+			return
+		}
+		// if relay message is of type "success", log the success message from relay
+		if abstractMessage.Type == "success" {
+			var successMessage relaySuccessMessage
+			if err := json.Unmarshal([]byte(message), &successMessage); err != nil {
+				log.Error("Error while decoding success message: ", err.Error(), nil)
+				return
+			}
+			log.Info(successMessage.Data)
+		}
+		// if relay message is of type "bundle", decode the payload and add bundle
+		// The sender is responsible for signing the transaction and using the correct nonce and ensuring validity
+		if abstractMessage.Type == "bundle" {
+			var bundleMessage relayBundleMessage
+			if err := json.Unmarshal([]byte(message), &bundleMessage); err != nil {
+				log.Error("Error while decoding bundle message: ", err.Error(), nil)
+				return
+			}
+
+			var txs types.Transactions
+
+			for _, encodedTx := range bundleMessage.Data.EncodedTxs {
+				tx := new(types.Transaction)
+				if err := rlp.DecodeBytes(encodedTx, tx); err != nil {
+					return
+				}
+				txs = append(txs, tx)
+			}
+			pool.AddMevBundle(txs, big.NewInt(bundleMessage.Data.BlockNumber.Int64()), bundleMessage.Data.MinTimestamp, bundleMessage.Data.MaxTimestamp)
+		}
+
+	}
+}
+
 // TxPool contains all currently known transactions. Transactions
 // enter the pool when they are received from the network or submitted
 // locally. They exit the pool when they are included in the blockchain.
@@ -227,6 +344,8 @@ type TxPool struct {
 	scope       event.SubscriptionScope
 	signer      types.Signer
 	mu          sync.RWMutex
+
+	wsConnection wsConn // Websocket connection
 
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
 	eip2718  bool // Fork indicator whether we are using EIP-2718 type transactions.
@@ -312,6 +431,24 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 	pool.wg.Add(1)
 	go pool.loop()
 
+	// Create WS connection with the relay server
+	// Both the host url and secrey key will be replaced by config, hardcoded only for testing
+	u := url.URL{Scheme: "ws", Host: "localhost:8080", Path: "/"}
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), http.Header{"X-Api-Key": []string{"secretABC"}})
+	if err != nil {
+		log.Error("websocket relay connection error: ", err)
+		pool.wsConnection.wlock.Lock()
+		defer pool.wsConnection.wlock.Unlock()
+		pool.wsConnection.wsConnected = false
+		// attempt reconnection here, TODO
+	} else {
+		pool.wsConnection.wlock.Lock()
+		defer pool.wsConnection.wlock.Unlock()
+		pool.wsConnection.wsConnected = true
+		pool.wsConnection.conn = conn
+		log.Info("Initiated a WS connection")
+		go pool.readWSMessages()
+	}
 	return pool
 }
 
@@ -405,6 +542,16 @@ func (pool *TxPool) Stop() {
 		pool.journal.close()
 	}
 	log.Info("Transaction pool stopped")
+	pool.wsConnection.rlock.Lock()
+	defer pool.wsConnection.rlock.Unlock()
+	if pool.wsConnection.wsConnected {
+		err := pool.wsConnection.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		if err != nil {
+			log.Error("Error closing WS connection:", err)
+			return
+		}
+		pool.wsConnection.Close()
+	}
 }
 
 // SubscribeNewTxsEvent registers a subscription of NewTxsEvent and
