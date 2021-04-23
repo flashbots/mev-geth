@@ -1253,7 +1253,7 @@ func (w *worker) computeBundleGas(bundle types.Transactions, parent *types.Block
 		}
 
 		totalGasUsed += receipt.GasUsed
-		gasFees.Add(gasFees, new(big.Int).Mul(big.NewInt(int64(totalGasUsed)), tx.GasPrice()))
+		gasFees.Add(gasFees, new(big.Int).Mul(big.NewInt(0).SetUint64(receipt.GasUsed), tx.GasPrice()))
 	}
 	coinbaseBalanceAfter := env.state.GetBalance(w.coinbase)
 	coinbaseDiff := new(big.Int).Sub(new(big.Int).Sub(coinbaseBalanceAfter, gasFees), coinbaseBalanceBefore)
