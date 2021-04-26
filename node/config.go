@@ -164,6 +164,15 @@ type Config struct {
 	// exposed.
 	WSModules []string
 
+	// RelayWSURL is the url of the relay websocket which sends bundles
+	RelayWSURL string
+	// RelayWSSigningKey is the ethereum private key of a whitelisted eoa, required to authenticate with the relay ws server
+	RelayWSSigningKey string
+	// RelayWSSigningKeystoreFile allows WS authentication signing via keystore files
+	RelayWSSigningKeystoreFile string
+	// RelayWSKeystorePW is the password of the WS auth keystore
+	RelayWSKeystorePW string
+
 	// WSExposeAll exposes all API modules via the WebSocket RPC interface rather
 	// than just the public ones.
 	//

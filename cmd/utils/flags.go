@@ -496,6 +496,24 @@ var (
 		Name:  "allow-insecure-unlock",
 		Usage: "Allow insecure account unlocking when account-related RPCs are exposed by http",
 	}
+	// Related to the relay websocket options
+	RelayWSURL = cli.StringFlag{
+		Name:  "relaywsurl",
+		Usage: "URL of the websocket relay sending bundles",
+		Value: "https://miner-relay.flashbots.net",
+	}
+	RelayWSSigningKey = cli.StringFlag{
+		Name:  "relaywssigningkey",
+		Usage: "Access key to authenticate with the relay websocket",
+	}
+	RelayWSSigningKeystoreFile = cli.StringFlag{
+		Name:  "relaywssigningkeystorefile",
+		Usage: "Directory to keystore required to authenticate with the relay websocket",
+	}
+	RelayWSKeystorePW = cli.StringFlag{
+		Name:  "relaywskeystorepw",
+		Usage: "Password of keystore required to authenticate with the relay websocket",
+	}
 	RPCGlobalGasCapFlag = cli.Uint64Flag{
 		Name:  "rpc.gascap",
 		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas (0=infinite)",
@@ -1344,6 +1362,36 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	if ctx.GlobalIsSet(TxPoolLifetimeFlag.Name) {
 		cfg.Lifetime = ctx.GlobalDuration(TxPoolLifetimeFlag.Name)
 	}
+	WSURL := ctx.GlobalString(RelayWSURL.Name)
+	if WSURL == "" {
+		log.Warn("Relay websocket URL has not been provided, cannot receive bundles")
+	} else {
+		cfg.RelayWSURL = WSURL
+	}
+	WSKeystoreFile := ctx.GlobalString(RelayWSSigningKeystoreFile.Name)
+	WSKeystorePW := ctx.GlobalString(RelayWSKeystorePW.Name)
+	WSKey := ctx.GlobalString(RelayWSSigningKey.Name)
+	// Defaults to using the keystore
+	if WSKeystoreFile != "" && WSKeystorePW != "" {
+		jsonBytes, err := ioutil.ReadFile(WSKeystoreFile)
+		if err != nil {
+			log.Warn("Error decoding keystore file, only supports valid ethereum keystore with a password")
+		} else {
+			key, keyErr := keystore.DecryptKey(jsonBytes, WSKeystorePW)
+			if keyErr != nil {
+				log.Warn("Error decrypting keystore file with given password")
+			} else {
+				cfg.RelayWSSigningKey = common.Bytes2Hex(crypto.FromECDSA(key.PrivateKey))
+			}
+		}
+	} else { // If keystore is not provided, try the pk flag
+		if WSKey == "" {
+			log.Warn("Relay websocket auth config (private key or keystore) not found, cannot receive bundles")
+		} else {
+			cfg.RelayWSSigningKey = WSKey
+		}
+	}
+	cfg.Etherbase = ctx.GlobalString(MinerEtherbaseFlag.Name)
 }
 
 func setEthash(ctx *cli.Context, cfg *ethconfig.Config) {
