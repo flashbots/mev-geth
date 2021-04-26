@@ -53,7 +53,7 @@ jobs:
       uses: actions/checkout@v2
       with:
         repository: flashbots/mev-geth-demo
-        ref: jason/v0.2
+        ref: v0.2-ws-eth-keys
         path: e2e
 
     - run: cd e2e && yarn install
@@ -61,5 +61,5 @@ jobs:
         cd e2e
         GETH=`pwd`/../build/bin/geth ./run.sh &
         sleep 15
-        yarn run demo-simple
-        yarn run demo-contract
+        yarn run demo-ws-simple
+        yarn run demo-ws-contract
