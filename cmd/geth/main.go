@@ -151,6 +151,8 @@ var (
 		utils.EVMInterpreterFlag,
 		utils.MinerNotifyFullFlag,
 		configFileFlag,
+		utils.RelayWSURL,
+		utils.RelayWSAccessKey,
 	}
 
 	rpcFlags = []cli.Flag{

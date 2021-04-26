@@ -160,6 +160,9 @@ type TxPoolConfig struct {
 	GlobalQueue  uint64 // Maximum number of non-executable transaction slots for all accounts
 
 	Lifetime time.Duration // Maximum amount of time non-executable transaction are queued
+
+	RelayWSURL       string // Relay websocket url
+	RelayWSAccessKey string // Relay websocket access key
 }
 
 // DefaultTxPoolConfig contains the default configurations for the transaction
@@ -224,6 +227,7 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 type wsConn struct {
 	conn        *websocket.Conn
 	wsConnected bool
+	pingPeriod  time.Duration
 	rlock       sync.Mutex
 	wlock       sync.Mutex
 }
@@ -250,6 +254,32 @@ type bundleData struct {
 	MaxTimestamp uint64          `json:"maxTimestamp"`
 }
 
+// Connect to the Relay WS to receive bundles
+func (pool *TxPool) connectWS() {
+	log.Info("Attempting websocket connection")
+	u := url.URL{Scheme: "ws", Host: pool.config.RelayWSURL, Path: "/"}
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), http.Header{"X-Api-Key": []string{pool.config.RelayWSAccessKey}})
+	if err != nil {
+		log.Error("Relay websocket connection error: ", err, nil)
+		pool.wsConnection.wsConnected = false
+	} else {
+		pool.wsConnection.wsConnected = true
+		pool.wsConnection.conn = conn
+		log.Info("Initiated a successful WS connection")
+		// Setup a pong handler, for client side heartbeat
+		pool.wsConnection.conn.SetPongHandler(func(string) error {
+			pool.wsConnection.wsConnected = true
+			return nil
+		})
+		go pool.readWSMessages()
+	}
+}
+
+// WS Status
+func (pool *TxPool) WebsocketStatus() bool {
+	return pool.wsConnection.wsConnected
+}
+
 // WriteJSON wraps corresponding method on the websocket but is safe for concurrent calling
 func (wsConnection *wsConn) WriteMessage(messageType int, data []byte) error {
 	wsConnection.wlock.Lock()
@@ -268,9 +298,8 @@ func (wsConnection *wsConn) ReadMessage() (int, string, error) {
 }
 
 // Close wraps corresponding method on the websocket but is safe for concurrent calling
-func (wsConnection *wsConn) Close() error {
-	// The Close and WriteControl methods can be called concurrently with all other methods,
-	// so the mutex is not used here
+func (wsConnection *wsConn) CloseWS() error {
+	// The Close and WriteControl methods can be called concurrently with other methods
 	return wsConnection.conn.Close()
 }
 
@@ -280,36 +309,35 @@ func (pool *TxPool) readWSMessages() {
 		messageType, message, err := pool.wsConnection.ReadMessage()
 		if err != nil {
 			if messageType == -1 { // message type emitted when relay ws connection is closed
-				log.Error("ws connection with relay closed")
+				log.Error("WS connection with relay closed")
 				pool.wsConnection.wlock.Lock()
 				defer pool.wsConnection.wlock.Unlock()
 				pool.wsConnection.wsConnected = false
-				// attempt reconnection here, TODO
 			} else {
-				log.Error("ws error while reading the message: ", err.Error(), messageType)
+				log.Error("WS error while reading the relay message: ", err.Error(), messageType)
 			}
 			return
 		}
 		var abstractMessage relayAbstractMessage
 		if err := json.Unmarshal([]byte(message), &abstractMessage); err != nil {
-			log.Error("Error while decoding json message: ", err.Error(), nil)
+			log.Error("Error while decoding relay message: ", err.Error(), nil)
 			return
 		}
-		// if relay message is of type "success", log the success message from relay
+		// If relay message is of type "success", log the success message from relay
 		if abstractMessage.Type == "success" {
 			var successMessage relaySuccessMessage
 			if err := json.Unmarshal([]byte(message), &successMessage); err != nil {
-				log.Error("Error while decoding success message: ", err.Error(), nil)
+				log.Error("Error while decoding relay success message: ", err.Error(), nil)
 				return
 			}
 			log.Info(successMessage.Data)
 		}
-		// if relay message is of type "bundle", decode the payload and add bundle
+		// If relay message is of type "bundle", decode the payload and add bundle
 		// The sender is responsible for signing the transaction and using the correct nonce and ensuring validity
 		if abstractMessage.Type == "bundle" {
 			var bundleMessage relayBundleMessage
 			if err := json.Unmarshal([]byte(message), &bundleMessage); err != nil {
-				log.Error("Error while decoding bundle message: ", err.Error(), nil)
+				log.Error("Error while decoding relay bundle message: ", err.Error(), nil)
 				return
 			}
 
@@ -322,9 +350,34 @@ func (pool *TxPool) readWSMessages() {
 				}
 				txs = append(txs, tx)
 			}
+			// Finally, we add the bundle sent to the tx pool
 			pool.AddMevBundle(txs, big.NewInt(bundleMessage.Data.BlockNumber.Int64()), bundleMessage.Data.MinTimestamp, bundleMessage.Data.MaxTimestamp)
 		}
 
+	}
+}
+
+// Go routine to ping the ws server periodically to ensure a live connection
+func (pool *TxPool) ping() {
+	pool.wsConnection.wlock.Lock()
+	defer pool.wsConnection.wlock.Unlock()
+	ticker := time.NewTicker(pool.wsConnection.pingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if !pool.wsConnection.wsConnected && pool.wsEnabled {
+				// If a ws connection hasn't already been established, attempt it
+				pool.connectWS()
+			} else {
+				// If it has already been connected, test with a ping message
+				if err := pool.wsConnection.conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(pool.wsConnection.pingPeriod)); err != nil {
+					pool.wsConnection.wsConnected = false
+					log.Info("Error while sending a ping to the relay WS")
+				}
+			}
+
+		}
 	}
 }
 
@@ -346,6 +399,7 @@ type TxPool struct {
 	mu          sync.RWMutex
 
 	wsConnection wsConn // Websocket connection
+	wsEnabled    bool
 
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
 	eip2718  bool // Fork indicator whether we are using EIP-2718 type transactions.
@@ -432,22 +486,14 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 	go pool.loop()
 
 	// Create WS connection with the relay server
-	// Both the host url and secrey key will be replaced by config, hardcoded only for testing
-	u := url.URL{Scheme: "ws", Host: "localhost:8080", Path: "/"}
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), http.Header{"X-Api-Key": []string{"secretABC"}})
-	if err != nil {
-		log.Error("websocket relay connection error: ", err)
-		pool.wsConnection.wlock.Lock()
-		defer pool.wsConnection.wlock.Unlock()
+	if config.RelayWSURL != "" && config.RelayWSAccessKey != "" {
+		pool.wsEnabled = true
 		pool.wsConnection.wsConnected = false
-		// attempt reconnection here, TODO
+		go pool.ping()
+		pool.wsConnection.pingPeriod = 10 * time.Second
 	} else {
-		pool.wsConnection.wlock.Lock()
-		defer pool.wsConnection.wlock.Unlock()
-		pool.wsConnection.wsConnected = true
-		pool.wsConnection.conn = conn
-		log.Info("Initiated a WS connection")
-		go pool.readWSMessages()
+		pool.wsEnabled = false
+		log.Warn("Provide --relayWSURL and --relayWSKey flags to receive bundles from the relay ws")
 	}
 	return pool
 }
@@ -550,7 +596,7 @@ func (pool *TxPool) Stop() {
 			log.Error("Error closing WS connection:", err)
 			return
 		}
-		pool.wsConnection.Close()
+		pool.wsConnection.CloseWS()
 	}
 }
 
