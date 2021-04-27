@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -530,6 +531,8 @@ func (ec *Client) SendTransaction(ctx context.Context, tx *types.Transaction) er
 func (ec *Client) SendMegaBundle(
 	ctx context.Context, mb *types.MegaBundle,
 ) error {
+	// temp hack
+	miner.IncomingMegaBundle <- mb
 	return nil
 }
 

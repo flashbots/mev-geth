@@ -195,28 +195,37 @@ type worker struct {
 	resubmitHook func(time.Duration, time.Duration) // Method to call upon updating resubmitting interval.
 }
 
+var (
+	IncomingMegaBundle = make(chan *types.MegaBundle)
+)
+
 func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, isLocalBlock func(*types.Block) bool, init bool, flashbots *flashbotsData) *worker {
 	exitCh := make(chan struct{})
 	taskCh := make(chan *task)
-	if flashbots.isFlashbots {
-		// publish to the flashbots queue
-		taskCh = flashbots.queue
-	} else {
-		// read from the flashbots queue
-		go func() {
-			for {
-				select {
-				case flashbotsTask := <-flashbots.queue:
+
+	if !flashbots.isMegaBundleWorker {
+
+		if flashbots.isFlashbots {
+			// publish to the flashbots queue
+			taskCh = flashbots.queue
+		} else {
+			// read from the flashbots queue
+			go func() {
+				for {
 					select {
-					case taskCh <- flashbotsTask:
+					case flashbotsTask := <-flashbots.queue:
+						select {
+						case taskCh <- flashbotsTask:
+						case <-exitCh:
+							return
+						}
 					case <-exitCh:
 						return
 					}
-				case <-exitCh:
-					return
 				}
-			}
-		}()
+			}()
+		}
+
 	}
 
 	worker := &worker{

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"flag"
 	"fmt"
 	"log"
@@ -9,11 +10,22 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 const (
-	miner = "0xd912aecb07e9f4e1ea8e6b4779e7fb6aa1c3e4d8"
+	miner              = "0xd912aecb07e9f4e1ea8e6b4779e7fb6aa1c3e4d8"
+	plainPayerContract = `
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.7.0;
+
+contract Bribe {
+    function bribe() payable public {
+        block.coinbase.transfer(msg.value);
+    }
+}
+`
 )
 
 var (
@@ -23,8 +35,27 @@ var (
 	cb = flag.String(
 		"coinbase", miner, "what coinbase to use",
 	)
-	at = flag.Uint64("kickoff", 64, "what number to kick off at")
+	at    = flag.Uint64("kickoff", 64, "what number to kick off at")
+	k1, _ = crypto.HexToECDSA(
+		"",
+	)
+	keys = []*ecdsa.PrivateKey{k1}
 )
+
+func mbTxList() types.Transactions {
+	txs := make(types.Transactions, len(keys))
+	for i, key := range keys {
+		// txs[i] = types.NewTransaction(
+		// 		nonce uint64,
+		// 		to common.Address,
+		// 		amount *big.Int,
+		// 		gasLimit uint64,
+		// 		gasPrice *big.Int,
+		// 		data []byte,
+		// 	)
+	}
+	return txs
+}
 
 func program() error {
 	client, err := ethclient.Dial(*clientDial)
@@ -50,7 +81,7 @@ func program() error {
 			if incoming.Number.Uint64() == *at {
 				if err := client.SendMegaBundle(
 					context.Background(), &types.MegaBundle{
-						TransactionList: nil,
+						TransactionList: mbTxList(),
 						Timestamp:       uint64(time.Now().Add(time.Second * 45).Unix()),
 						Coinbase_diff:   3e18,
 						Coinbase:        common.HexToAddress(*cb),
