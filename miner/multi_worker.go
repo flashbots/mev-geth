@@ -103,7 +103,7 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 			isFlashbots: true,
 			queue:       queue,
 			// hacky for now?
-			maxMergedBundles: -1,
+			maxMergedBundles: len(workers),
 			mb:               &mb{},
 		}),
 	)
@@ -116,7 +116,7 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 
 type mb struct {
 	latest *types.MegaBundle
-	sync.Mutex
+	sync.RWMutex
 }
 
 type flashbotsData struct {

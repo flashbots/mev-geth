@@ -118,6 +118,7 @@ func program() error {
 					t.Nonce(),
 				)
 				fmt.Println("deployed bribe contract ", newContractAddr.Hex())
+				continue
 			}
 
 			if blockNumber == *at {
@@ -132,6 +133,7 @@ func program() error {
 				); err != nil {
 					return err
 				}
+
 				fmt.Println("kicked off mega bundle")
 			}
 		}

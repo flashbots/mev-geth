@@ -229,6 +229,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 	if flashbots.mb != nil {
 		go func() {
 			for b := range IncomingMegaBundle {
+				fmt.Println("bundle came in!", b)
 				flashbots.mb.Lock()
 				flashbots.mb.latest = b
 				flashbots.mb.Unlock()
@@ -1237,6 +1238,15 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		}
 		w.current.profit.Add(w.current.profit, bundle.totalEth)
 	}
+
+	if w.flashbots.mb != nil {
+		w.flashbots.mb.RLock()
+		if l := w.flashbots.mb.latest; l != nil {
+			w.commitBundle(l.TransactionList, l.Coinbase, interrupt)
+		}
+		w.flashbots.mb.RUnlock()
+	}
+
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, localTxs)
 		if w.commitTransactions(txs, w.coinbase, interrupt) {
