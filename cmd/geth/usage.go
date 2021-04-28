@@ -190,6 +190,7 @@ var AppHelpFlagGroups = []flags.FlagGroup{
 			utils.MinerNoVerfiyFlag,
 			utils.MinerStrictProfitSwitchFlag,
 			utils.MinerProxyContractAddress,
+			utils.MinerMaxMergedBundles,
 		},
 	},
 	{

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -105,6 +106,7 @@ type task struct {
 
 	profit      *big.Int
 	isFlashbots bool
+	worker      int
 }
 
 const (
@@ -627,7 +629,7 @@ func (w *worker) taskLoop() {
 		// Interrupt previous sealing operation
 		interrupt()
 		stopCh, prev = make(chan struct{}), sealHash
-		log.Info("Proposed miner block", "blockNumber", task.block.Number(), "profit", ethIntToFloat(prevProfit), "isFlashbots", task.isFlashbots, "sealhash", sealHash, "parentHash", prevParentHash)
+		log.Info("Proposed miner block", "blockNumber", task.block.Number(), "profit", ethIntToFloat(prevProfit), "isFlashbots", task.isFlashbots, "sealhash", sealHash, "parentHash", prevParentHash, "worker", task.worker)
 		if w.skipSealHook != nil && w.skipSealHook(task) {
 			return
 		}
@@ -1214,19 +1216,20 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			log.Error("Failed to fetch pending transactions", "err", err)
 			return
 		}
-		bundle, err := w.findMostProfitableBundle(bundles, w.coinbase, parent, header, pending)
+
+		bundleTxs, bundle, numBundles, err := w.generateFlashbotsBundle(bundles, w.coinbase, parent, header, pending)
 		if err != nil {
 			log.Error("Failed to generate flashbots bundle", "err", err)
 			return
 		}
-		log.Info("Flashbots bundle", "ethToCoinbase", ethIntToFloat(bundle.totalEth), "gasUsed", bundle.totalGasUsed, "bundleScore", bundle.mevGasPrice, "bundleLength", len(bundle.originalBundle.Txs))
-		if len(bundle.originalBundle.Txs) == 0 {
+		log.Info("Flashbots bundle", "ethToCoinbase", ethIntToFloat(bundle.totalEth), "gasUsed", bundle.totalGasUsed, "bundleScore", bundle.mevGasPrice, "bundleLength", len(bundleTxs), "numBundles", numBundles, "worker", w.flashbots.maxMergedBundles)
+		if len(bundleTxs) == 0 {
 			return
 		}
-		if w.commitBundle(bundle.originalBundle.Txs, w.coinbase, interrupt) {
+		if w.commitBundle(bundleTxs, w.coinbase, interrupt) {
 			return
 		}
-		w.current.profit.Add(w.current.profit, bundle.ethSentToCoinbase)
+		w.current.profit.Add(w.current.profit, bundle.totalEth)
 	}
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, localTxs)
@@ -1259,13 +1262,13 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 		}
 
 		select {
-		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now(), profit: w.current.profit, isFlashbots: w.flashbots.isFlashbots}:
+		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now(), profit: w.current.profit, isFlashbots: w.flashbots.isFlashbots, worker: w.flashbots.maxMergedBundles}:
 			w.unconfirmed.Shift(block.NumberU64() - 1)
 			log.Info("Commit new mining work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
 				"uncles", len(uncles), "txs", w.current.tcount,
 				"gas", block.GasUsed(), "fees", totalFees(block, receipts), "profit", ethIntToFloat(w.current.profit),
 				"elapsed", common.PrettyDuration(time.Since(start)),
-				"isFlashbots", w.flashbots.isFlashbots)
+				"isFlashbots", w.flashbots.isFlashbots, "worker", w.flashbots.maxMergedBundles)
 
 		case <-w.exitCh:
 			log.Info("Worker has exited")
@@ -1285,13 +1288,80 @@ type simulatedBundle struct {
 	originalBundle    types.MevBundle
 }
 
-func (w *worker) findMostProfitableBundle(bundles []types.MevBundle, coinbase common.Address, parent *types.Block, header *types.Header, pendingTxs map[common.Address]types.Transactions) (simulatedBundle, error) {
-	maxBundle := simulatedBundle{}
+func (w *worker) generateFlashbotsBundle(bundles []types.MevBundle, coinbase common.Address, parent *types.Block, header *types.Header, pendingTxs map[common.Address]types.Transactions) (types.Transactions, simulatedBundle, int, error) {
+	simulatedBundles, err := w.simulateBundles(bundles, coinbase, parent, header, pendingTxs)
+	if err != nil {
+		return nil, simulatedBundle{}, 0, err
+	}
+
+	sort.SliceStable(simulatedBundles, func(i, j int) bool {
+		return simulatedBundles[j].mevGasPrice.Cmp(simulatedBundles[i].mevGasPrice) < 0
+	})
+
+	return w.mergeBundles(simulatedBundles, parent, header, pendingTxs)
+}
+
+func (w *worker) mergeBundles(bundles []simulatedBundle, parent *types.Block, header *types.Header, pendingTxs map[common.Address]types.Transactions) (types.Transactions, simulatedBundle, int, error) {
+	finalBundle := types.Transactions{}
+
+	state, err := w.chain.StateAt(parent.Root())
+	if err != nil {
+		return nil, simulatedBundle{}, 0, err
+	}
+	gasPool := new(core.GasPool).AddGas(header.GasLimit)
+
+	prevState := state
+	prevGasPool := gasPool
+
+	mergedBundle := simulatedBundle{
+		totalEth:          new(big.Int),
+		ethSentToCoinbase: new(big.Int),
+	}
+
+	count := 0
+	for _, bundle := range bundles {
+		prevState = state.Copy()
+		prevGasPool = new(core.GasPool).AddGas(gasPool.Gas())
+
+		simmed, err := w.computeBundleGas(bundle.originalBundle, parent, header, state, gasPool, pendingTxs)
+		if err != nil || simmed.totalEth.Cmp(new(big.Int)) < 0 {
+			state = prevState
+			gasPool = prevGasPool
+			continue
+		}
+
+		log.Info("Included bundle", "ethToCoinbase", ethIntToFloat(simmed.totalEth), "gasUsed", simmed.totalGasUsed, "bundleScore", simmed.mevGasPrice, "bundleLength", len(simmed.originalBundle.Txs), "worker", w.flashbots.maxMergedBundles)
+
+		finalBundle = append(finalBundle, bundle.originalBundle.Txs...)
+		mergedBundle.totalEth.Add(mergedBundle.totalEth, simmed.totalEth)
+		mergedBundle.ethSentToCoinbase.Add(mergedBundle.ethSentToCoinbase, simmed.ethSentToCoinbase)
+		mergedBundle.totalGasUsed += simmed.totalGasUsed
+		count++
+
+		if count >= w.flashbots.maxMergedBundles {
+			break
+		}
+	}
+
+	if len(finalBundle) == 0 || count != w.flashbots.maxMergedBundles {
+		return nil, simulatedBundle{}, count, nil
+	}
+
+	return finalBundle, simulatedBundle{
+		mevGasPrice:       new(big.Int).Div(mergedBundle.totalEth, new(big.Int).SetUint64(mergedBundle.totalGasUsed)),
+		totalEth:          mergedBundle.totalEth,
+		ethSentToCoinbase: mergedBundle.ethSentToCoinbase,
+		totalGasUsed:      mergedBundle.totalGasUsed,
+	}, count, nil
+}
+
+func (w *worker) simulateBundles(bundles []types.MevBundle, coinbase common.Address, parent *types.Block, header *types.Header, pendingTxs map[common.Address]types.Transactions) ([]simulatedBundle, error) {
+	simulatedBundles := []simulatedBundle{}
 
 	for _, bundle := range bundles {
 		state, err := w.chain.StateAt(parent.Root())
 		if err != nil {
-			return simulatedBundle{}, err
+			return nil, err
 		}
 		gasPool := new(core.GasPool).AddGas(header.GasLimit)
 		if len(bundle.Txs) == 0 {
@@ -1303,13 +1373,10 @@ func (w *worker) findMostProfitableBundle(bundles []types.MevBundle, coinbase co
 			log.Debug("Error computing gas for a bundle", "error", err)
 			continue
 		}
-
-		if maxBundle.mevGasPrice == nil || maxBundle.mevGasPrice.Cmp(maxBundle.mevGasPrice) > 0 {
-			maxBundle = simmed
-		}
+		simulatedBundles = append(simulatedBundles, simmed)
 	}
 
-	return maxBundle, nil
+	return simulatedBundles, nil
 }
 
 func containsHash(arr []common.Hash, match common.Hash) bool {
@@ -1346,18 +1413,23 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 			return simulatedBundle{}, err
 		}
 
-		gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
-		gasFees = gasFees.Add(gasFees, gasUsed.Mul(gasUsed, tx.GasPrice()))
-
-		// check if tx is in mempool
+		txInPendingPool := false
 		if accountTxs, ok := pendingTxs[from]; ok {
+			// check if tx is in pending pool
 			txNonce := tx.Nonce()
 
 			for _, accountTx := range accountTxs {
 				if accountTx.Nonce() == txNonce {
-					continue // skip counting this tx
+					txInPendingPool = true
+					break
 				}
 			}
+		}
+
+		if !txInPendingPool {
+			// If tx is not in pending pool, count the gas fees
+			gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+			gasFees.Add(gasFees, gasUsed.Mul(gasUsed, tx.GasPrice()))
 		}
 
 		for _, l := range receipt.Logs {
@@ -1374,7 +1446,6 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 				}
 			}
 		}
-
 	}
 
 	totalEth := new(big.Int).Add(ethSentToCoinbase, gasFees)

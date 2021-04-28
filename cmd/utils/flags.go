@@ -472,6 +472,11 @@ var (
 		Usage: "flashbots - The address of the proxy payment contract",
 		Value: "0x9D5fD9F03419912de052F37450f968bBdC5ef92d",
 	}
+	MinerMaxMergedBundles = cli.IntFlag{
+		Name:  "miner.maxmergedbundles",
+		Usage: "flashbots - The maximum amount of bundles to merge. The miner will run this many workers in parallel to calculate if the full block is more profitable with these additional bundles.",
+		Value: 3,
+	}
 	MinerNoVerfiyFlag = cli.BoolFlag{
 		Name:  "miner.noverify",
 		Usage: "Disable remote sealing verification",
@@ -1397,14 +1402,14 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.GlobalIsSet(MinerStrictProfitSwitchFlag.Name) {
 		cfg.StrictProfitWait = ctx.GlobalDuration(MinerStrictProfitSwitchFlag.Name)
 	}
-	if ctx.GlobalIsSet(MinerProxyContractAddress.Name) {
-		address := ctx.GlobalString(MinerProxyContractAddress.Name)
 
-		if !common.IsHexAddress(address) {
-			Fatalf("Invalid address in --miner.proxycontractaddress: %s", address)
-		} else {
-			cfg.ProxyPaymentAddress = common.HexToAddress(address)
-		}
+	cfg.MaxMergedBundles = ctx.GlobalInt(MinerMaxMergedBundles.Name)
+	address := ctx.GlobalString(MinerProxyContractAddress.Name)
+
+	if !common.IsHexAddress(address) {
+		Fatalf("Invalid address in --miner.proxycontractaddress: %s", address)
+	} else {
+		cfg.ProxyPaymentAddress = common.HexToAddress(address)
 	}
 }
 

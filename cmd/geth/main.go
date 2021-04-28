@@ -127,6 +127,7 @@ var (
 		utils.MinerNoVerfiyFlag,
 		utils.MinerStrictProfitSwitchFlag,
 		utils.MinerProxyContractAddress,
+		utils.MinerMaxMergedBundles,
 		utils.NATFlag,
 		utils.NoDiscoverFlag,
 		utils.DiscoveryV5Flag,

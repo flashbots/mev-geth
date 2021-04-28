@@ -53,6 +53,7 @@ type Config struct {
 	Noverify            bool           // Disable remote mining solution verification(only useful in ethash).
 	StrictProfitWait    time.Duration
 	ProxyPaymentAddress common.Address
+	MaxMergedBundles    int
 }
 
 // Miner creates blocks and searches for proof-of-work values.
