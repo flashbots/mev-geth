@@ -205,29 +205,35 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 	exitCh := make(chan struct{})
 	taskCh := make(chan *task)
 
-	if !flashbots.isMegaBundleWorker {
-
-		if flashbots.isFlashbots {
-			// publish to the flashbots queue
-			taskCh = flashbots.queue
-		} else {
-			// read from the flashbots queue
-			go func() {
-				for {
+	if flashbots.isFlashbots {
+		// publish to the flashbots queue
+		taskCh = flashbots.queue
+	} else {
+		// read from the flashbots queue
+		go func() {
+			for {
+				select {
+				case flashbotsTask := <-flashbots.queue:
 					select {
-					case flashbotsTask := <-flashbots.queue:
-						select {
-						case taskCh <- flashbotsTask:
-						case <-exitCh:
-							return
-						}
+					case taskCh <- flashbotsTask:
 					case <-exitCh:
 						return
 					}
+				case <-exitCh:
+					return
 				}
-			}()
-		}
+			}
+		}()
+	}
 
+	if flashbots.mb != nil {
+		go func() {
+			for b := range IncomingMegaBundle {
+				flashbots.mb.Lock()
+				flashbots.mb.latest = b
+				flashbots.mb.Unlock()
+			}
+		}()
 	}
 
 	worker := &worker{
