@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -25,6 +27,16 @@ const (
 	//     }
 	// }
 	bribeContractBin = `0x6080604052348015600f57600080fd5b5060a78061001e6000396000f3fe608060405260043610601c5760003560e01c806337d0208c146021575b600080fd5b60276029565b005b4173ffffffffffffffffffffffffffffffffffffffff166108fc349081150290604051600060405180830381858888f19350505050158015606e573d6000803e3d6000fd5b5056fea2646970667358221220862610b9326c9523da6465ba88229d2c6b26ff844b3c9cddb807c2c1ab401dd964736f6c63430007050033`
+	bribeContractABI = `[
+    {
+      inputs: [],
+      name: 'bribe',
+      outputs: [],
+      stateMutability: 'payable',
+      type: 'function'
+    }
+  ]
+`
 )
 
 var (
@@ -41,29 +53,40 @@ var (
 	faucet, _ = crypto.HexToECDSA(
 		"133be114715e5fe528a1b8adf36792160601a2d63ab59d1fd454275b31328791",
 	)
-	keys = []*ecdsa.PrivateKey{k1, faucet}
+	keys        = []*ecdsa.PrivateKey{k1, faucet}
+	bribeABI, _ = abi.JSON(strings.NewReader(string(bribeContractABI)))
 )
 
-func mbTxList() types.Transactions {
-	var txs types.Transactions
-	// test the contract creation way -
-	// also might be in megabundle right
+func mbTxList(
+	client *ethclient.Client,
+	toAddr common.Address,
+) (types.Transactions, error) {
 
-	// txs := make(types.Transactions, len(keys))
-	for i, key := range keys {
-		_ = i
-		_ = key
-		// txs[i] = types.NewTransaction(
-		// 		nonce uint64,
-		// 		to common.Address,
-		// 		amount *big.Int,
-		// 		gasLimit uint64,
-		// 		gasPrice *big.Int,
-		// 		data []byte,
-		// 	)
+	packed, err := bribeABI.Methods["bribe"].Inputs.Pack()
+	if err != nil {
+		return nil, err
 	}
-	// txs = append(txs, )
-	return txs
+	txs := make(types.Transactions, len(keys))
+
+	for i, key := range keys {
+		non, err := client.NonceAt(
+			context.Background(), crypto.PubkeyToAddress(key.PublicKey), nil,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		txs[i] = types.NewTransaction(
+			non,
+			toAddr,
+			new(big.Int),
+			100_000,
+			big.NewInt(3e9),
+			packed,
+		)
+
+	}
+	return txs, nil
 }
 
 func deployBribeContract(client *ethclient.Client) (*types.Transaction, error) {
@@ -100,6 +123,8 @@ func program() error {
 		return err
 	}
 
+	var newContractAddr common.Address
+
 	for {
 		select {
 		case e := <-sub.Err():
@@ -113,7 +138,7 @@ func program() error {
 					return err
 				}
 
-				newContractAddr := crypto.CreateAddress(
+				newContractAddr = crypto.CreateAddress(
 					crypto.PubkeyToAddress(faucet.PublicKey),
 					t.Nonce(),
 				)
@@ -122,9 +147,13 @@ func program() error {
 			}
 
 			if blockNumber == *at {
+				txs, err := mbTxList(client, newContractAddr)
+				if err != nil {
+					return err
+				}
 				if err := client.SendMegaBundle(
 					context.Background(), &types.MegaBundle{
-						TransactionList: mbTxList(),
+						TransactionList: txs,
 						Timestamp:       uint64(time.Now().Add(time.Second * 45).Unix()),
 						Coinbase_diff:   3e18,
 						Coinbase:        common.HexToAddress(*cb),
