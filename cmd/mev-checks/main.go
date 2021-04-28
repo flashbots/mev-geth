@@ -49,11 +49,6 @@ func mbTxList() types.Transactions {
 	// test the contract creation way -
 	// also might be in megabundle right
 
-	t := types.NewContractCreation(
-		0, new(big.Int), 200_000, big.NewInt(10e9), common.Hex2Bytes(bribeContractBin),
-	)
-	t, _ = types.SignTx(t, types.NewEIP155Signer(big.NewInt(1)), faucet)
-	txs = append(txs, t)
 	// txs := make(types.Transactions, len(keys))
 	for i, key := range keys {
 		_ = i
@@ -69,6 +64,25 @@ func mbTxList() types.Transactions {
 	}
 	// txs = append(txs, )
 	return txs
+}
+
+func deployBribeContract(client *ethclient.Client) (*types.Transaction, error) {
+	t := types.NewContractCreation(
+		0, new(big.Int), 400_000, big.NewInt(10e9),
+		common.Hex2Bytes(bribeContractBin),
+	)
+
+	chainID, err := client.ChainID(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	t, err = types.SignTx(t, types.NewEIP155Signer(chainID), faucet)
+	if err != nil {
+		return nil, err
+	}
+
+	return t, client.SendTransaction(context.Background(), t)
 }
 
 func program() error {
@@ -91,8 +105,22 @@ func program() error {
 		case e := <-sub.Err():
 			return e
 		case incoming := <-ch:
-			fmt.Println("header is ", incoming)
-			if incoming.Number.Uint64() == *at {
+			// fmt.Println("header is ", incoming)
+			blockNumber := incoming.Number.Uint64()
+			if blockNumber == 30 {
+				t, err := deployBribeContract(client)
+				if err != nil {
+					return err
+				}
+
+				newContractAddr := crypto.CreateAddress(
+					crypto.PubkeyToAddress(faucet.PublicKey),
+					t.Nonce(),
+				)
+				fmt.Println("deployed bribe contract ", newContractAddr.Hex())
+			}
+
+			if blockNumber == *at {
 				if err := client.SendMegaBundle(
 					context.Background(), &types.MegaBundle{
 						TransactionList: mbTxList(),
