@@ -127,7 +127,10 @@ func program() error {
 		return err
 	}
 
-	var newContractAddr common.Address
+	var (
+		newContractAddr common.Address
+		usedTxs         types.Transactions
+	)
 
 	for {
 		select {
@@ -150,14 +153,14 @@ func program() error {
 			}
 
 			if blockNumber == *at {
-				txs, err := mbTxList(client, newContractAddr)
+				usedTxs, err := mbTxList(client, newContractAddr)
 				if err != nil {
 					return err
 				}
 
 				if err := client.SendMegaBundle(
 					context.Background(), &types.MegaBundle{
-						TransactionList: txs,
+						TransactionList: usedTxs,
 						Timestamp:       uint64(time.Now().Add(time.Second * 45).Unix()),
 						Coinbase_diff:   3e18,
 						Coinbase:        common.HexToAddress(*cb),
@@ -167,6 +170,21 @@ func program() error {
 					return err
 				}
 				fmt.Println("kicked off mega bundle")
+			}
+
+			if blockNumber > *at {
+				blk, err := client.BlockByNumber(context.Background(), incoming.Number)
+				if err != nil {
+					return err
+				}
+				for _, t := range blk.Transactions() {
+					for _, t2 := range usedTxs {
+						if t.Hash() == t2.Hash() {
+							fmt.Println("our mega bundle tx was confirmed", t.Hash())
+							return nil
+						}
+					}
+				}
 			}
 		}
 	}
