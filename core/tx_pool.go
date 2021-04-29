@@ -272,7 +272,6 @@ func (pool *TxPool) connectWS() {
 			pool.wsConnection.wsConnected = true
 			return nil
 		})
-		go pool.readWSMessages()
 	}
 }
 
@@ -307,50 +306,48 @@ func (wsConnection *wsConn) CloseWS() error {
 // Go routine that looks for messages from the relay
 func (pool *TxPool) readWSMessages() {
 	for {
-		messageType, message, err := pool.wsConnection.ReadMessage()
-		if err != nil {
-			if messageType == -1 { // message type emitted when relay ws connection is closed
-				log.Error("WS connection with relay closed")
-				pool.wsConnection.wsConnected = false
-			} else {
-				log.Error("WS error while reading the relay message: ", err.Error(), messageType)
-			}
-			return
-		}
-		var abstractMessage relayAbstractMessage
-		if err := json.Unmarshal([]byte(message), &abstractMessage); err != nil {
-			log.Error("Error while decoding relay message: ", err.Error(), nil)
-			return
-		}
-		// If relay message is of type "success", log the success message from relay
-		if abstractMessage.Type == "success" {
-			var successMessage relaySuccessMessage
-			if err := json.Unmarshal([]byte(message), &successMessage); err != nil {
-				log.Error("Error while decoding relay success message: ", err.Error(), nil)
-				return
-			}
-			log.Info(successMessage.Data)
-		}
-		// If relay message is of type "bundle", decode the payload and add bundle
-		// The sender is responsible for signing the transaction and using the correct nonce and ensuring validity
-		if abstractMessage.Type == "bundle" {
-			var bundleMessage relayBundleMessage
-			if err := json.Unmarshal([]byte(message), &bundleMessage); err != nil {
-				log.Error("Error while decoding relay bundle message: ", err.Error(), nil)
-				return
-			}
-
-			var txs types.Transactions
-
-			for _, encodedTx := range bundleMessage.Data.EncodedTxs {
-				tx := new(types.Transaction)
-				if err := rlp.DecodeBytes(encodedTx, tx); err != nil {
-					return
+		if pool.wsConnection.wsConnected {
+			messageType, message, err := pool.wsConnection.ReadMessage()
+			if err != nil {
+				if messageType == -1 { // message type emitted when relay ws connection is closed
+					log.Error("WS connection with relay closed")
+					pool.wsConnection.wsConnected = false
+				} else {
+					log.Error("WS error while reading the relay message: ", err.Error(), messageType)
 				}
-				txs = append(txs, tx)
 			}
-			// Finally, we add the bundle sent to the tx pool
-			pool.AddMevBundle(txs, big.NewInt(bundleMessage.Data.BlockNumber.Int64()), bundleMessage.Data.MinTimestamp, bundleMessage.Data.MaxTimestamp, bundleMessage.Data.RevertingTxHashes)
+			var abstractMessage relayAbstractMessage
+			if err := json.Unmarshal([]byte(message), &abstractMessage); err != nil {
+				log.Error("Error while decoding relay message: ", err.Error(), nil)
+			}
+			// If relay message is of type "success", log the success message from relay
+			if abstractMessage.Type == "success" {
+				var successMessage relaySuccessMessage
+				if err := json.Unmarshal([]byte(message), &successMessage); err != nil {
+					log.Error("Error while decoding relay success message: ", err.Error(), nil)
+				}
+				log.Info(successMessage.Data)
+			}
+			// If relay message is of type "bundle", decode the payload and add bundle
+			// The sender is responsible for signing the transaction and using the correct nonce and ensuring validity
+			if abstractMessage.Type == "bundle" {
+				var bundleMessage relayBundleMessage
+				if err := json.Unmarshal([]byte(message), &bundleMessage); err != nil {
+					log.Error("Error while decoding relay bundle message: ", err.Error(), nil)
+				}
+
+				var txs types.Transactions
+
+				for _, encodedTx := range bundleMessage.Data.EncodedTxs {
+					tx := new(types.Transaction)
+					if err := rlp.DecodeBytes(encodedTx, tx); err != nil {
+						log.Error("Error while decoding bundle transactions: ", err.Error(), nil)
+					}
+					txs = append(txs, tx)
+				}
+				// Finally, we add the bundle sent to the tx pool
+				pool.AddMevBundle(txs, big.NewInt(bundleMessage.Data.BlockNumber.Int64()), bundleMessage.Data.MinTimestamp, bundleMessage.Data.MaxTimestamp, bundleMessage.Data.RevertingTxHashes)
+			}
 		}
 
 	}
@@ -372,7 +369,8 @@ func (pool *TxPool) ping() {
 				// If it has already been connected, test with a ping message
 				if err := pool.wsConnection.conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(pool.wsConnection.pingPeriod)); err != nil {
 					pool.wsConnection.wsConnected = false
-					log.Info("Error while sending a ping to the relay WS")
+					log.Info("Error while sending a ping to the relay WS, attempting reconnection")
+					pool.connectWS()
 				}
 			}
 
@@ -489,6 +487,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		pool.wsEnabled = true
 		pool.wsConnection.wsConnected = false
 		go pool.ping()
+		go pool.readWSMessages()
 		pool.wsConnection.pingPeriod = 10 * time.Second
 	} else {
 		pool.wsEnabled = false
