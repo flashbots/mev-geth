@@ -40,6 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -2120,6 +2121,11 @@ type SendBundleArgs struct {
 	MinTimestamp      *uint64         `json:"minTimestamp"`
 	MaxTimestamp      *uint64         `json:"maxTimestamp"`
 	RevertingTxHashes []common.Hash   `json:"revertingTxHashes"`
+}
+
+func (s *PrivateTxBundleAPI) SendMegaBundle(ctx context.Context, mb *types.MegaBundle) error {
+	miner.IncomingMegaBundle <- mb
+	return nil
 }
 
 // SendBundle will add the signed transaction to the transaction pool.

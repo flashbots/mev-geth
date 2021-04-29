@@ -229,7 +229,6 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 	if flashbots.mb != nil {
 		go func() {
 			for b := range IncomingMegaBundle {
-				fmt.Println("bundle came in!", b)
 				flashbots.mb.Lock()
 				flashbots.mb.latest = b
 				flashbots.mb.Unlock()

@@ -100,10 +100,9 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 	// mega bundle worker
 	workers = append(workers,
 		newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, &flashbotsData{
-			isFlashbots: true,
-			queue:       queue,
-			// hacky for now?
-			maxMergedBundles: len(workers),
+			isFlashbots:      true,
+			queue:            queue,
+			maxMergedBundles: len(workers) + 1,
 			mb:               &mb{},
 		}),
 	)

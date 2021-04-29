@@ -46,14 +46,11 @@ var (
 	cb = flag.String(
 		"coinbase", miner, "what coinbase to use",
 	)
-	at    = flag.Uint64("kickoff", 64, "what number to kick off at")
-	k1, _ = crypto.HexToECDSA(
-		"",
-	)
+	at        = flag.Uint64("kickoff", 32, "what number to kick off at")
 	faucet, _ = crypto.HexToECDSA(
 		"133be114715e5fe528a1b8adf36792160601a2d63ab59d1fd454275b31328791",
 	)
-	keys        = []*ecdsa.PrivateKey{k1, faucet}
+	keys        = []*ecdsa.PrivateKey{faucet}
 	bribeABI, _ = abi.JSON(strings.NewReader(string(bribeContractABI)))
 )
 
@@ -69,12 +66,19 @@ func mbTxList(
 	txs := make(types.Transactions, len(keys))
 
 	for i, key := range keys {
+		k := crypto.PubkeyToAddress(key.PublicKey)
 		non, err := client.NonceAt(
-			context.Background(), crypto.PubkeyToAddress(key.PublicKey), nil,
+			context.Background(), k, nil,
 		)
 		if err != nil {
 			return nil, err
 		}
+
+		balance, err := client.BalanceAt(context.Background(), k, nil)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Println("public key is ", k.Hex(), "balance", balance)
 
 		txs[i] = types.NewTransaction(
 			non,
@@ -132,7 +136,7 @@ func program() error {
 		case incoming := <-ch:
 			// fmt.Println("header is ", incoming)
 			blockNumber := incoming.Number.Uint64()
-			if blockNumber == 30 {
+			if blockNumber == 15 {
 				t, err := deployBribeContract(client)
 				if err != nil {
 					return err
@@ -151,6 +155,7 @@ func program() error {
 				if err != nil {
 					return err
 				}
+
 				if err := client.SendMegaBundle(
 					context.Background(), &types.MegaBundle{
 						TransactionList: txs,
@@ -162,7 +167,6 @@ func program() error {
 				); err != nil {
 					return err
 				}
-
 				fmt.Println("kicked off mega bundle")
 			}
 		}
