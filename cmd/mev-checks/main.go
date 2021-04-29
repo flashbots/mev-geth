@@ -134,7 +134,6 @@ func program() error {
 		case e := <-sub.Err():
 			return e
 		case incoming := <-ch:
-			// fmt.Println("header is ", incoming)
 			blockNumber := incoming.Number.Uint64()
 			if blockNumber == 15 {
 				t, err := deployBribeContract(client)

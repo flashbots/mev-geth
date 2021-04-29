@@ -1216,7 +1216,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			localTxs[account] = txs
 		}
 	}
-	if w.flashbots.isFlashbots {
+	if w.flashbots.isFlashbots && w.flashbots.mb == nil {
 		bundles, err := w.eth.TxPool().MevBundles(header.Number, header.Time)
 		if err != nil {
 			log.Error("Failed to fetch pending transactions", "err", err)
