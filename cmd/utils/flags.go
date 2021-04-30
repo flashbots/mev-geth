@@ -505,6 +505,15 @@ var (
 		Name:  "allow-insecure-unlock",
 		Usage: "Allow insecure account unlocking when account-related RPCs are exposed by http",
 	}
+	// Related to the relay websocket options
+	RelayWSURL = cli.StringFlag{
+		Name:  "relayWSURL",
+		Usage: "URL of the websocket relay sending bundles",
+	}
+	RelayWSAccessKey = cli.StringFlag{
+		Name:  "relayWSKey",
+		Usage: "Access key to authenticate with the relay websocket",
+	}
 	RPCGlobalGasCapFlag = cli.Uint64Flag{
 		Name:  "rpc.gascap",
 		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas (0=infinite)",
@@ -1346,6 +1355,18 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	}
 	if ctx.GlobalIsSet(TxPoolLifetimeFlag.Name) {
 		cfg.Lifetime = ctx.GlobalDuration(TxPoolLifetimeFlag.Name)
+	}
+	WSURL := ctx.GlobalString(RelayWSURL.Name)
+	if WSURL == "" {
+		log.Warn("Relay websocket URL has not been provided, cannot receive bundles")
+	} else {
+		cfg.RelayWSURL = WSURL
+	}
+	WSKey := ctx.GlobalString(RelayWSAccessKey.Name)
+	if WSKey == "" {
+		log.Warn("Relay websocket access key has not been provided, cannot receive bundles")
+	} else {
+		cfg.RelayWSAccessKey = WSKey
 	}
 }
 
