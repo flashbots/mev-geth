@@ -97,7 +97,7 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 		newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, &flashbotsData{
 			isFlashbots:      true,
 			queue:            queue,
-			maxMergedBundles: 0,
+			maxMergedBundles: -1,
 			mb:               &mb{},
 		}),
 	)
