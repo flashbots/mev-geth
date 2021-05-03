@@ -470,7 +470,7 @@ var (
 	MinerProxyContractAddress = cli.StringFlag{
 		Name:  "miner.proxycontractaddress",
 		Usage: "flashbots - The address of the proxy payment contract",
-		Value: "0x9D5fD9F03419912de052F37450f968bBdC5ef92d",
+		Value: "0xf1A54b075Fb71768ac31B33fd7c61ad8f9f7Dd18",
 	}
 	MinerMaxMergedBundles = cli.IntFlag{
 		Name:  "miner.maxmergedbundles",

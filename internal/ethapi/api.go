@@ -2123,11 +2123,6 @@ type SendBundleArgs struct {
 	RevertingTxHashes []common.Hash   `json:"revertingTxHashes"`
 }
 
-func (s *PrivateTxBundleAPI) SendMegaBundle(ctx context.Context, mb *types.MegaBundle) error {
-	miner.IncomingMegaBundle <- mb
-	return nil
-}
-
 // SendBundle will add the signed transaction to the transaction pool.
 // The sender is responsible for signing the transaction and using the correct nonce and ensuring validity
 func (s *PrivateTxBundleAPI) SendBundle(ctx context.Context, args SendBundleArgs) error {
@@ -2156,4 +2151,9 @@ func (s *PrivateTxBundleAPI) SendBundle(ctx context.Context, args SendBundleArgs
 	}
 
 	return s.b.SendBundle(ctx, txs, args.BlockNumber, minTimestamp, maxTimestamp, args.RevertingTxHashes)
+}
+
+func (s *PrivateTxBundleAPI) SendMegaBundle(ctx context.Context, mb *types.MegaBundle) error {
+	miner.IncomingMegaBundle <- mb
+	return nil
 }
