@@ -1133,6 +1133,11 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		if w.flashbots.mb.latest != nil {
 			maybeMB = *w.flashbots.mb.latest
 			useMB = true
+			defer func() {
+				w.flashbots.mb.Lock()
+				w.flashbots.mb.latest = nil
+				w.flashbots.mb.Unlock()
+			}()
 		}
 		w.flashbots.mb.RUnlock()
 	}
