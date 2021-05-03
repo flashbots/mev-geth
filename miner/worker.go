@@ -225,6 +225,20 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		}()
 	}
 
+	if flashbots.mb != nil {
+		go func() {
+			for b := range IncomingMegaBundle {
+				flashbots.mb.Lock()
+				fmt.Println(
+					"about to set the megabundle at block",
+					eth.BlockChain().CurrentHeader().Number,
+				)
+				flashbots.mb.latest = b
+				flashbots.mb.Unlock()
+			}
+		}()
+	}
+
 	worker := &worker{
 		config:             config,
 		chainConfig:        chainConfig,
@@ -1095,17 +1109,35 @@ func (w *worker) commitTransactions(txs *types.TransactionsByPriceAndNonce, coin
 	return false
 }
 
+func (w *worker) megabundleWork() {
+	//
+}
+
 // commitNewWork generates several new sealing tasks based on the parent block.
 func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
+
 	tstart := time.Now()
 	parent := w.chain.CurrentBlock()
 
 	if parent.Time() >= uint64(timestamp) {
 		timestamp = int64(parent.Time() + 1)
 	}
+
 	num := parent.Number()
+	// we are the megabundle worker
+	var maybeMB types.MegaBundle
+
+	if w.flashbots.mb != nil {
+		w.flashbots.mb.RLock()
+		fmt.Println("megabundle worker", num, parent.Hash().Hex())
+		if w.flashbots.mb.latest != nil {
+			maybeMB = *w.flashbots.mb.latest
+		}
+		w.flashbots.mb.RUnlock()
+	}
+
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     num.Add(num, common.Big1),
@@ -1120,7 +1152,13 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			return
 		}
 		header.Coinbase = w.coinbase
+		if w.flashbots.mb != nil {
+			header.Coinbase = maybeMB.Coinbase
+			header.Time = maybeMB.Timestamp
+			header.ParentHash = maybeMB.ParentHash
+		}
 	}
+
 	if err := w.engine.Prepare(w.chain, header); err != nil {
 		log.Error("Failed to prepare header for mining", "err", err)
 		return
@@ -1189,7 +1227,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	// Short circuit if there is no available pending transactions or bundles.
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
-	noBundles := true
+	noBundles := true && w.flashbots.mb == nil
 	if w.flashbots.isFlashbots && len(w.eth.TxPool().AllMevBundles()) > 0 {
 		noBundles = false
 	}
@@ -1205,7 +1243,8 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			localTxs[account] = txs
 		}
 	}
-	if w.flashbots.isFlashbots {
+
+	if w.flashbots.isFlashbots && w.flashbots.mb == nil {
 		bundles, err := w.eth.TxPool().MevBundles(header.Number, header.Time)
 		if err != nil {
 			log.Error("Failed to fetch pending transactions", "err", err)
@@ -1226,6 +1265,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		}
 		w.current.profit.Add(w.current.profit, bundle.totalEth)
 	}
+
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, localTxs)
 		if w.commitTransactions(txs, w.coinbase, interrupt) {

@@ -148,7 +148,7 @@ func program() error {
 					crypto.PubkeyToAddress(faucet.PublicKey),
 					t.Nonce(),
 				)
-				fmt.Println("deployed bribe contract ", newContractAddr.Hex())
+				fmt.Println("deployed bribe contract ", newContractAddr.Hex(), blockNumber)
 				continue
 			}
 
@@ -162,7 +162,7 @@ func program() error {
 					context.Background(), &types.MegaBundle{
 						TransactionList: usedTxs,
 						Timestamp:       uint64(time.Now().Add(time.Second * 45).Unix()),
-						Coinbase_diff:   3e18,
+						CoinbaseDiff:    3e18,
 						Coinbase:        common.HexToAddress(*cb),
 						ParentHash:      incoming.Root,
 					},
