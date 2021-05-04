@@ -42,7 +42,7 @@ import (
 
 const (
 	// resultQueueSize is the size of channel listening to sealing result.
-	resultQueueSize = 10
+	resultQueueSize = 20
 
 	// txChanSize is the size of channel listening to NewTxsEvent.
 	// The number is referenced from the size of tx pool.
@@ -1440,6 +1440,7 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 
 	for i, tx := range bundle.Txs {
 		state.Prepare(tx.Hash(), common.Hash{}, i+currentTxCount)
+		coinbaseBalanceBefore := state.GetBalance(w.coinbase)
 
 		receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &w.coinbase, gasPool, state, header, tx, &tempGasUsed, *w.chain.GetVMConfig())
 		if err != nil {
@@ -1475,19 +1476,11 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 			gasFees.Add(gasFees, gasUsed.Mul(gasUsed, tx.GasPrice()))
 		}
 
-		for _, l := range receipt.Logs {
-			if l.Address == w.config.ProxyPaymentAddress && len(l.Topics) > 0 && l.Topics[0] == proxyPaymentTopic {
-				event := new(ProxyFlashbotsPayment)
+		coinbaseBalanceAfter := state.GetBalance(w.coinbase)
+		coinbaseDelta := big.NewInt(0).Sub(coinbaseBalanceAfter, coinbaseBalanceBefore)
+		coinbaseDelta.Sub(coinbaseDelta, gasFees)
+		ethSentToCoinbase.Add(ethSentToCoinbase, coinbaseDelta)
 
-				if err := proxyABI.UnpackIntoInterface(event, "FlashbotsPayment", l.Data); err != nil {
-					log.Error("Error parsing FlashbotsPayment event log", "err", err)
-					return simulatedBundle{}, err
-				}
-				if event.Coinbase == w.coinbase {
-					ethSentToCoinbase.Add(ethSentToCoinbase, event.Amount)
-				}
-			}
-		}
 	}
 
 	totalEth := new(big.Int).Add(ethSentToCoinbase, gasFees)
