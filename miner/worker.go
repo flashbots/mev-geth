@@ -1272,6 +1272,42 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		w.current.profit.Add(w.current.profit, bundle.totalEth)
 	}
 
+	if useMB {
+		gasPool := new(core.GasPool).AddGas(header.GasLimit)
+		state, err := w.chain.StateAt(header.ParentHash)
+		if err != nil {
+			log.Error("Failed to generate flashbots megabundle", "err", err)
+			return
+		}
+
+		megaBundle, err := w.computeBundleGas(
+			types.MevBundle{
+				Txs: maybeMB.TransactionList,
+			}, parent, header, state, gasPool, pending, 0,
+		)
+
+		if err != nil {
+			log.Error("Failed to generate flashbots megabundle", "err", err)
+			return
+		}
+
+		if megaBundle.ethSentToCoinbase.Cmp(
+			big.NewInt(int64(maybeMB.CoinbaseDiff)),
+		) == -1 {
+			log.Warn(
+				"eth send to code base did not exceed diff needed",
+				megaBundle.totalEth, maybeMB.CoinbaseDiff,
+			)
+			return
+		}
+
+		if w.commitBundle(megaBundle.originalBundle.Txs, header.Coinbase, interrupt) {
+			return
+		}
+
+		w.current.profit.Add(w.current.profit, megaBundle.totalEth)
+	}
+
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, localTxs)
 		if w.commitTransactions(txs, w.coinbase, interrupt) {
@@ -1344,7 +1380,7 @@ func (w *worker) generateFlashbotsBundle(bundles []types.MevBundle, coinbase com
 
 func (w *worker) mergeBundles(bundles []simulatedBundle, parent *types.Block, header *types.Header, pendingTxs map[common.Address]types.Transactions) (types.Transactions, simulatedBundle, int, error) {
 	finalBundle := types.Transactions{}
-
+	zero := new(big.Int)
 	state, err := w.chain.StateAt(parent.Root())
 	if err != nil {
 		return nil, simulatedBundle{}, 0, err
@@ -1365,7 +1401,7 @@ func (w *worker) mergeBundles(bundles []simulatedBundle, parent *types.Block, he
 		prevGasPool = new(core.GasPool).AddGas(gasPool.Gas())
 
 		simmed, err := w.computeBundleGas(bundle.originalBundle, parent, header, state, gasPool, pendingTxs, len(finalBundle))
-		if err != nil || simmed.totalEth.Cmp(new(big.Int)) < 0 {
+		if err != nil || simmed.totalEth.Cmp(zero) < 0 {
 			state = prevState
 			gasPool = prevGasPool
 			continue
