@@ -166,13 +166,15 @@ func program() error {
 					return err
 				}
 
-				fmt.Println("using as parent hash", incoming.Hash().Hex())
+				fmt.Println("using as parent hash",
+					incoming.Hash().Hex(), incoming.Number,
+				)
 
 				if err := client.SendMegaBundle(
 					context.Background(), &types.MegaBundle{
 						TransactionList: usedTxs,
 						Timestamp:       uint64(time.Now().Add(time.Second * 45).Unix()),
-						CoinbaseDiff:    3e18,
+						CoinbaseDiff:    1e17,
 						Coinbase:        common.HexToAddress(*cb),
 						ParentHash:      incoming.Hash(),
 					},
