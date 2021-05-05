@@ -57,6 +57,7 @@ var (
 func mbTxList(
 	client *ethclient.Client,
 	toAddr common.Address,
+	chainID *big.Int,
 ) (types.Transactions, error) {
 
 	packed, err := bribeABI.Methods["bribe"].Inputs.Pack()
@@ -80,7 +81,7 @@ func mbTxList(
 		}
 		fmt.Println("public key is ", k.Hex(), "balance", balance)
 
-		txs[i] = types.NewTransaction(
+		t := types.NewTransaction(
 			non,
 			toAddr,
 			new(big.Int),
@@ -88,23 +89,25 @@ func mbTxList(
 			big.NewInt(3e9),
 			packed,
 		)
-
+		t, err = types.SignTx(t, types.NewEIP155Signer(chainID), key)
+		if err != nil {
+			return nil, err
+		}
+		txs[i] = t
 	}
 	return txs, nil
 }
 
-func deployBribeContract(client *ethclient.Client) (*types.Transaction, error) {
+func deployBribeContract(
+	client *ethclient.Client,
+	chainID *big.Int,
+) (*types.Transaction, error) {
 	t := types.NewContractCreation(
 		0, new(big.Int), 400_000, big.NewInt(10e9),
 		common.Hex2Bytes(bribeContractBin),
 	)
 
-	chainID, err := client.ChainID(context.Background())
-	if err != nil {
-		return nil, err
-	}
-
-	t, err = types.SignTx(t, types.NewEIP155Signer(chainID), faucet)
+	t, err := types.SignTx(t, types.NewEIP155Signer(chainID), faucet)
 	if err != nil {
 		return nil, err
 	}
@@ -132,6 +135,11 @@ func program() error {
 		usedTxs         types.Transactions
 	)
 
+	chainID, err := client.ChainID(context.Background())
+	if err != nil {
+		return err
+	}
+
 	for {
 		select {
 		case e := <-sub.Err():
@@ -139,7 +147,7 @@ func program() error {
 		case incoming := <-ch:
 			blockNumber := incoming.Number.Uint64()
 			if blockNumber == 15 {
-				t, err := deployBribeContract(client)
+				t, err := deployBribeContract(client, chainID)
 				if err != nil {
 					return err
 				}
@@ -153,10 +161,12 @@ func program() error {
 			}
 
 			if blockNumber == *at {
-				usedTxs, err := mbTxList(client, newContractAddr)
+				usedTxs, err := mbTxList(client, newContractAddr, chainID)
 				if err != nil {
 					return err
 				}
+
+				fmt.Println("using as parent hash", incoming.Hash().Hex())
 
 				if err := client.SendMegaBundle(
 					context.Background(), &types.MegaBundle{
@@ -164,7 +174,7 @@ func program() error {
 						Timestamp:       uint64(time.Now().Add(time.Second * 45).Unix()),
 						CoinbaseDiff:    3e18,
 						Coinbase:        common.HexToAddress(*cb),
-						ParentHash:      incoming.Root,
+						ParentHash:      incoming.Hash(),
 					},
 				); err != nil {
 					return err
