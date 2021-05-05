@@ -19,7 +19,6 @@ package miner
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -1136,7 +1135,6 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			useMB = true
 			defer func() {
 				w.flashbots.mb.Lock()
-				fmt.Println("clearing out the megabundle")
 				w.flashbots.mb.latest = nil
 				w.flashbots.mb.Unlock()
 			}()
@@ -1159,17 +1157,13 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		}
 		header.Coinbase = w.coinbase
 		if useMB {
-			s2, _ := json.MarshalIndent(maybeMB, " ", " ")
-			fmt.Println("USE MB HAPPENED! A", string(s2))
 			header.Coinbase = maybeMB.Coinbase
 			header.Time = maybeMB.Timestamp
 			header.ParentHash = maybeMB.ParentHash
 		}
-
 	}
 
 	if err := w.engine.Prepare(w.chain, header); err != nil {
-		fmt.Println("OKAY IT DIED HERE A", err, maybeMB)
 		log.Error("Failed to prepare header for mining", "err", err)
 		return
 	}
@@ -1190,7 +1184,6 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	// Could potentially happen if starting to mine in an odd state.
 	err := w.makeCurrent(parent, header)
 	if err != nil {
-		fmt.Println("OKAY IT DIED HERE B ", err)
 		log.Error("Failed to create mining context", "err", err)
 		return
 	}
@@ -1220,9 +1213,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			}
 		}
 	}
-	if useMB {
-		fmt.Println("about to commit uncles")
-	}
+
 	// Prefer to locally generated uncle
 	commitUncles(w.localUncles)
 	commitUncles(w.remoteUncles)
@@ -1247,9 +1238,6 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		noBundles = false
 	}
 	if len(pending) == 0 && atomic.LoadUint32(&w.noempty) == 0 && noBundles {
-		if useMB {
-			fmt.Println("uhoh this is mega bundle dying out?")
-		}
 		w.updateSnapshot()
 		return
 	}
@@ -1288,11 +1276,6 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		gasPool := new(core.GasPool).AddGas(header.GasLimit)
 		state, err := w.chain.StateAt(header.ParentHash)
 		if err != nil {
-			fmt.Println("what is the problem here!? A",
-				err, parent.Hash().Hex(),
-				header.ParentHash.Hex(),
-				num,
-			)
 			log.Error("Failed to generate flashbots megabundle", "err", err)
 			return
 		}
@@ -1304,12 +1287,6 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		)
 
 		if err != nil {
-			fmt.Println(
-				"what is the problem here!? B",
-				err, parent.Hash().Hex(),
-				header.ParentHash.Hex(),
-				num,
-			)
 			log.Error("Failed to generate flashbots megabundle", "err", err)
 			return
 		}
@@ -1317,7 +1294,6 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		if megaBundle.ethSentToCoinbase.Cmp(
 			big.NewInt(int64(maybeMB.CoinbaseDiff)),
 		) == -1 {
-			fmt.Println("exiting early because we didn't pay out!?")
 			log.Warn(
 				"eth send to code base did not exceed diff needed",
 				megaBundle.totalEth, maybeMB.CoinbaseDiff,
@@ -1325,12 +1301,10 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			return
 		}
 
-		fmt.Println("about to do commit bundle")
 		if w.commitBundle(megaBundle.originalBundle.Txs, header.Coinbase, interrupt) {
 			return
 		}
 
-		fmt.Println("USE MB HAPPENED! B")
 		w.current.profit.Add(w.current.profit, megaBundle.totalEth)
 	}
 
