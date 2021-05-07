@@ -154,7 +154,7 @@ var (
 		utils.EVMInterpreterFlag,
 		utils.MinerNotifyFullFlag,
 		utils.RelayWSURL,
-		utils.RelayWSAccessKey,
+		utils.RelayWSSigningKey,
 		configFileFlag,
 	}
 

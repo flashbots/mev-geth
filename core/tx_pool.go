@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
@@ -161,8 +163,9 @@ type TxPoolConfig struct {
 
 	Lifetime time.Duration // Maximum amount of time non-executable transaction are queued
 
-	RelayWSURL       string // Relay websocket url
-	RelayWSAccessKey string // Relay websocket access key
+	RelayWSURL        string // Relay websocket url
+	RelayWSSigningKey string // Relay websocket access key
+	Etherbase         string
 }
 
 // DefaultTxPoolConfig contains the default configurations for the transaction
@@ -259,7 +262,9 @@ type bundleData struct {
 func (pool *TxPool) connectWS() {
 	log.Info("Attempting websocket connection")
 	u := url.URL{Scheme: "ws", Host: pool.config.RelayWSURL, Path: "/"}
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), http.Header{"X-Api-Key": []string{pool.config.RelayWSAccessKey}})
+	authMessage := map[string]string{"timestamp": pool.getUTCTimestamp(), "signature": pool.getWSAuthSignature(), "coinbase": pool.config.Etherbase}
+	encodedAuthMessage, _ := json.Marshal(authMessage)
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), http.Header{"X-Auth-Message": {string(encodedAuthMessage)}})
 	if err != nil {
 		log.Error("Relay websocket connection error: ", err, nil)
 		pool.wsConnection.wsConnected = false
@@ -351,6 +356,27 @@ func (pool *TxPool) readWSMessages() {
 		}
 
 	}
+}
+
+func (pool *TxPool) getUTCTimestamp() string {
+	now := time.Now()
+	seconds := now.Unix()
+	return strconv.FormatInt(seconds, 10)
+}
+
+func (pool *TxPool) getWSAuthSignature() string {
+	privateKey, err := crypto.HexToECDSA(pool.config.RelayWSSigningKey)
+	if err != nil {
+		log.Warn(err.Error())
+	}
+	message := pool.getUTCTimestamp()
+	log.Info(message)
+	hash := crypto.Keccak256Hash([]byte(message))
+	signature, err := crypto.Sign(hash.Bytes(), privateKey)
+	if err != nil {
+		log.Warn(err.Error())
+	}
+	return hexutil.Encode(signature)
 }
 
 // Go routine to ping the ws server periodically to ensure a live connection
@@ -483,15 +509,15 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 	go pool.loop()
 
 	// Create WS connection with the relay server
-	if config.RelayWSURL != "" && config.RelayWSAccessKey != "" {
+	if config.RelayWSURL != "" && config.RelayWSSigningKey != "" {
 		pool.wsEnabled = true
 		pool.wsConnection.wsConnected = false
+		pool.wsConnection.pingPeriod = 10 * time.Second
 		go pool.ping()
 		go pool.readWSMessages()
-		pool.wsConnection.pingPeriod = 10 * time.Second
 	} else {
 		pool.wsEnabled = false
-		log.Warn("Provide --relayWSURL and --relayWSKey flags to receive bundles from the relay ws")
+		log.Warn("Provide --relayWSURL and --relayWSSigningKey flags to receive bundles from the relay ws")
 	}
 	return pool
 }

@@ -510,8 +510,8 @@ var (
 		Name:  "relayWSURL",
 		Usage: "URL of the websocket relay sending bundles",
 	}
-	RelayWSAccessKey = cli.StringFlag{
-		Name:  "relayWSKey",
+	RelayWSSigningKey = cli.StringFlag{
+		Name:  "relayWSSigningKey",
 		Usage: "Access key to authenticate with the relay websocket",
 	}
 	RPCGlobalGasCapFlag = cli.Uint64Flag{
@@ -1362,12 +1362,13 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	} else {
 		cfg.RelayWSURL = WSURL
 	}
-	WSKey := ctx.GlobalString(RelayWSAccessKey.Name)
+	WSKey := ctx.GlobalString(RelayWSSigningKey.Name)
 	if WSKey == "" {
-		log.Warn("Relay websocket access key has not been provided, cannot receive bundles")
+		log.Warn("Relay websocket signing key has not been provided, cannot receive bundles")
 	} else {
-		cfg.RelayWSAccessKey = WSKey
+		cfg.RelayWSSigningKey = WSKey
 	}
+	cfg.Etherbase = ctx.GlobalString(MinerEtherbaseFlag.Name)
 }
 
 func setEthash(ctx *cli.Context, cfg *ethconfig.Config) {
