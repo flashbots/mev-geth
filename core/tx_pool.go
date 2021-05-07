@@ -370,7 +370,6 @@ func (pool *TxPool) getWSAuthSignature() string {
 		log.Warn(err.Error())
 	}
 	message := pool.getUTCTimestamp()
-	log.Info(message)
 	hash := crypto.Keccak256Hash([]byte(message))
 	signature, err := crypto.Sign(hash.Bytes(), privateKey)
 	if err != nil {
