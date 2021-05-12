@@ -607,7 +607,7 @@ func (w *worker) taskLoop() {
 			// Interrupt previous sealing operation
 			interrupt()
 			stopCh, prev = make(chan struct{}), sealHash
-			log.Info("Proposed miner block", "blockNumber", task.block.Number(), "profit", ethIntToFloat(prevProfit), "isFlashbots", task.isFlashbots, "sealhash", sealHash, "parentHash", prevParentHash)
+			log.Info("Proposed miner block", "blockNumber", task.block.Number(), "profit", ethIntToFloat(prevProfit), "isFlashbots", task.isFlashbots, "sealhash", sealHash, "parentHash", prevParentHash, "worker", task.worker)
 			if w.skipSealHook != nil && w.skipSealHook(task) {
 				continue
 			}
@@ -1357,11 +1357,12 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 		if !txInPendingPool {
 			// If tx is not in pending pool, count the gas fees
 			gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
-			gasFees.Add(gasFees, gasUsed.Mul(gasUsed, tx.GasPrice()))
+			gasFeesTx := gasUsed.Mul(gasUsed, tx.GasPrice())
+			gasFees.Add(gasFees, gasFeesTx)
 
 			coinbaseBalanceAfter := state.GetBalance(w.coinbase)
 			coinbaseDelta := big.NewInt(0).Sub(coinbaseBalanceAfter, coinbaseBalanceBefore)
-			coinbaseDelta.Sub(coinbaseDelta, gasFees)
+			coinbaseDelta.Sub(coinbaseDelta, gasFeesTx)
 			ethSentToCoinbase.Add(ethSentToCoinbase, coinbaseDelta)
 		}
 	}

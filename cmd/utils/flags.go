@@ -1414,7 +1414,6 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	}
 
 	cfg.MaxMergedBundles = ctx.GlobalInt(MinerMaxMergedBundles.Name)
-	address := ctx.GlobalString(MinerProxyContractAddress.Name)
 }
 
 func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
