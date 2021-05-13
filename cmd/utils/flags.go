@@ -505,6 +505,14 @@ var (
 		Name:  "relayWSSigningKey",
 		Usage: "Access key to authenticate with the relay websocket",
 	}
+	RelayWSSigningKeystoreDir = cli.StringFlag{
+		Name:  "relayWSSigningKeystoreDir",
+		Usage: "Directory to keystore required to authenticate with the relay websocket",
+	}
+	RelayWSKeystorePW = cli.StringFlag{
+		Name:  "relayWSKeystorePW",
+		Usage: "Password of keystore required to authenticate with the relay websocket",
+	}
 	RPCGlobalGasCapFlag = cli.Uint64Flag{
 		Name:  "rpc.gascap",
 		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas (0=infinite)",
@@ -1353,11 +1361,28 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	} else {
 		cfg.RelayWSURL = WSURL
 	}
+	WSKeystoreDir := ctx.GlobalString(RelayWSSigningKeystoreDir.Name)
+	WSKeystorePW := ctx.GlobalString(RelayWSKeystorePW.Name)
 	WSKey := ctx.GlobalString(RelayWSSigningKey.Name)
-	if WSKey == "" {
-		log.Warn("Relay websocket signing key has not been provided, cannot receive bundles")
-	} else {
-		cfg.RelayWSSigningKey = WSKey
+	// Defaults to using the keystore
+	if WSKeystoreDir != "" && WSKeystorePW != "" {
+		jsonBytes, err := ioutil.ReadFile(WSKeystoreDir)
+		if err != nil {
+			log.Warn("Error decoding keystore file, only supports valid ethereum keystore with a password")
+		} else {
+			key, keyErr := keystore.DecryptKey(jsonBytes, WSKeystorePW)
+			if keyErr != nil {
+				log.Warn("Error decrypting keystore file with given password")
+			} else {
+				cfg.RelayWSSigningKey = common.Bytes2Hex(crypto.FromECDSA(key.PrivateKey))
+			}
+		}
+	} else { // If keystore is not provided, try the pk flag
+		if WSKey == "" {
+			log.Warn("Relay websocket auth config (private key or keystore) not found, cannot receive bundles")
+		} else {
+			cfg.RelayWSSigningKey = WSKey
+		}
 	}
 	cfg.Etherbase = ctx.GlobalString(MinerEtherbaseFlag.Name)
 }

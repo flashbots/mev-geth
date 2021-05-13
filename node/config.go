@@ -168,6 +168,10 @@ type Config struct {
 	RelayWSURL string
 	// RelayWSSigningKey is the ethereum private key of a whitelisted eoa, required to authenticate with the relay ws server
 	RelayWSSigningKey string
+	// RelayWSSigningKeystoreDir allows WS authentication signing via keystore files
+	RelayWSSigningKeystoreDir string
+	// RelayWSKeystorePW is the password of the WS auth keystore
+	RelayWSKeystorePW string
 
 	// WSExposeAll exposes all API modules via the WebSocket RPC interface rather
 	// than just the public ones.

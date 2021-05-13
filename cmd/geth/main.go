@@ -153,6 +153,8 @@ var (
 		utils.MinerNotifyFullFlag,
 		utils.RelayWSURL,
 		utils.RelayWSSigningKey,
+		utils.RelayWSSigningKeystoreDir,
+		utils.RelayWSKeystorePW,
 		configFileFlag,
 	}
 
