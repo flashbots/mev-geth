@@ -82,6 +82,14 @@ Parameters:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
 
+  PrivateZoneName:
+    Type: String
+    Default: geth.internal
+
+  ServiceName:
+    Type: String
+    Default: node
+
   # SNS Parameters
 
   SNSSubscriptionEndpoint:
@@ -172,6 +180,10 @@ Metadata:
         default: "The name of the node ECS Task"
       ECSAMI:
         default: "The ECS AMI ID populated from SSM."
+      PrivateZoneName:
+        default: "The DNS zone that should be used for service discovery records."
+      ServiceName:
+        default: "The service name prefix that should be used for service discovery records."
       Network:
         default: "The Ethereum network you will be connecting to"
       SyncMode:
@@ -211,6 +223,8 @@ Metadata:
           - NodeDesiredCount
           - NodeTaskName
           - ECSAMI
+          - PrivateZoneName
+          - ServiceName
       - Label:
           default: Mev-Geth Configuration
         Parameters:
@@ -238,6 +252,8 @@ Mappings:
     us-east-2:
       mainnet: mev-geth-updater-fast-chainbucket-17p2xhnhcydlz
       goerli: mev-geth-updater-fast-goerli-chainbucket-j6dujg8apbna
+    eu-west-1:
+      mainnet: mev-geth-updater-fast-chainbucket-17p2xhnhcydlz
     #us-west-2:
     #  mainnet:
     #  goerli:
@@ -642,6 +658,11 @@ Resources:
         - ContainerName: !Ref NodeTaskName
           ContainerPort: !Ref WsPort
           TargetGroupArn: !Ref NodeWsTargetGroup
+      ServiceName: !Sub ${ServiceName}-${Network}-${SyncMode}
+      ServiceRegistries:
+        - RegistryArn: !GetAtt DiscoveryService.Arn
+          ContainerName: !Ref NodeTaskName
+          ContainerPort: !Ref RpcPort
 
   NodeTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -688,14 +709,34 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-group: !Ref NodeLogGroup
               awslogs-stream-prefix: !Ref AWS::StackName
-          #HealthCheck:
-          #  Command:
-          #    - CMD-SHELL
-          #    - '[ `echo "eth.syncing.highestBlock - eth.syncing.currentBlock"|geth attach|head -10|tail -1` -lt 200 ] || exit 1'
-          #  Interval: 300
-          #  Timeout: 60
-          #  Retries: 10
-          #  StartPeriod: 300
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - '[ `echo "eth.syncing" | geth attach | head -10 | tail -1` = "false" ] || exit 1'
+            Interval: 300
+            Timeout: 60
+            Retries: 10
+            StartPeriod: 300
+
+  PrivateNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+        Name: !Ref PrivateZoneName
+        Vpc: !Ref VPC
+
+  DiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Description: Discovery service for nodes
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - TTL: 60
+            Type: SRV
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+      Name: !Sub ${ServiceName}-${Network}-${SyncMode}
+      NamespaceId: !Ref PrivateNamespace
 
   # CodePipeline Resources
 

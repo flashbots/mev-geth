@@ -694,14 +694,14 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-group: !Ref NodeLogGroup
               awslogs-stream-prefix: !Ref AWS::StackName
-          #HealthCheck:
-          #  Command:
-          #    - CMD-SHELL
-          #    - '[ `echo "eth.syncing.highestBlock - eth.syncing.currentBlock"|geth attach|head -10|tail -1` -lt 200 ] || exit 1'
-          #  Interval: 300
-          #  Timeout: 60
-          #  Retries: 10
-          #  StartPeriod: 300
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - '[ `echo "eth.syncing" | geth attach --datadir /root/.ethereum | head -10 | tail -1` = "false" ] || exit 1'
+            Interval: 300
+            Timeout: 60
+            Retries: 10
+            StartPeriod: 300
 
 # CodePipeline Resources
 

@@ -16,7 +16,7 @@ init_node() {
 start_node() {
 	if [ $network = "goerli" ]
     then
-        geth \
+        exec geth \
           --port $netport \
           --http \
           --http.addr 0.0.0.0 \
@@ -42,7 +42,7 @@ start_node() {
             exit 1
         fi
     else 
-        geth \
+        exec geth \
           --port $netport \
           --http \
           --http.addr 0.0.0.0 \
