@@ -102,9 +102,11 @@ type task struct {
 	block     *types.Block
 	createdAt time.Time
 
-	profit      *big.Int
-	isFlashbots bool
-	worker      int
+	mevPoolTxns      types.Transactions
+	profit           *big.Int
+	isFlashbots      bool
+	worker           int
+	maxMergedBundles int
 }
 
 const (
@@ -510,7 +512,7 @@ func (w *worker) mainLoop() {
 						uncles = append(uncles, uncle.Header())
 						return false
 					})
-					w.commit(uncles, nil, true, start)
+					w.commit(uncles, nil, true, start, nil, w.flashbots.maxMergedBundles)
 				}
 			}
 
@@ -1135,7 +1137,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.
 	if !noempty && atomic.LoadUint32(&w.noempty) == 0 {
-		w.commit(uncles, nil, false, tstart)
+		w.commit(uncles, nil, false, tstart, nil, w.flashbots.maxMergedBundles)
 	}
 
 	// Fill the block with all available pending transactions.
@@ -1163,6 +1165,9 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			localTxs[account] = txs
 		}
 	}
+
+	var mevTxs types.Transactions
+
 	if w.flashbots.isFlashbots {
 		bundles, err := w.eth.TxPool().MevBundles(header.Number, header.Time)
 		if err != nil {
@@ -1183,6 +1188,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			return
 		}
 		w.current.profit.Add(w.current.profit, bundle.totalEth)
+		mevTxs = bundleTxs
 	}
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, localTxs, header.BaseFee)
@@ -1196,12 +1202,12 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			return
 		}
 	}
-	w.commit(uncles, w.fullTaskHook, true, tstart)
+	w.commit(uncles, w.fullTaskHook, true, tstart, mevTxs, w.flashbots.maxMergedBundles)
 }
 
 // commit runs any post-transaction state modifications, assembles the final block
 // and commits new work if consensus engine is running.
-func (w *worker) commit(uncles []*types.Header, interval func(), update bool, start time.Time) error {
+func (w *worker) commit(uncles []*types.Header, interval func(), update bool, start time.Time, mevTxs types.Transactions, maxMergedBundles int) error {
 	// Deep copy receipts here to avoid interaction between different tasks.
 	receipts := copyReceipts(w.current.receipts)
 	s := w.current.state.Copy()
@@ -1214,7 +1220,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 			interval()
 		}
 		select {
-		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now(), profit: w.current.profit, isFlashbots: w.flashbots.isFlashbots, worker: w.flashbots.maxMergedBundles}:
+		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now(), profit: w.current.profit, isFlashbots: w.flashbots.isFlashbots, worker: w.flashbots.maxMergedBundles, mevPoolTxns: mevTxs, maxMergedBundles: maxMergedBundles}:
 			w.unconfirmed.Shift(block.NumberU64() - 1)
 			log.Info("Commit new mining work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
 				"uncles", len(uncles), "txs", w.current.tcount,

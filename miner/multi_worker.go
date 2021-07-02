@@ -1,6 +1,9 @@
 package miner
 
 import (
+	"encoding/json"
+	"math/big"
+	"os"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -73,7 +76,7 @@ func (w *multiWorker) disablePreseal() {
 	}
 }
 
-func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, isLocalBlock func(*types.Block) bool, init bool) *multiWorker {
+func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, isLocalBlock func(*types.Block) bool, init bool, jsonMEVLogFile *os.File) *multiWorker {
 	queue := make(chan *task)
 
 	regularWorker := newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, &flashbotsData{
@@ -81,6 +84,29 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 		queue:       queue,
 	})
 
+	if jsonMEVLogFile != nil {
+		type r struct {
+			BlockNumber      *big.Int
+			CreatedAt        time.Time
+			Profit           *big.Int
+			IsFlashbots      bool
+			MevTxs           types.Transactions
+			MaxMergedBundles int
+		}
+
+		regularWorker.newTaskHook = func(t *task) {
+			if err := json.NewEncoder(jsonMEVLogFile).Encode(r{
+				BlockNumber:      t.block.Number(),
+				CreatedAt:        t.createdAt,
+				Profit:           t.profit,
+				IsFlashbots:      t.isFlashbots,
+				MevTxs:           t.mevPoolTxns,
+				MaxMergedBundles: t.maxMergedBundles,
+			}); err != nil {
+				log.Info("Writing jsonMEV log failed", err)
+			}
+		}
+	}
 	workers := []*worker{regularWorker}
 
 	for i := 1; i <= config.MaxMergedBundles; i++ {

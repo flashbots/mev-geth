@@ -107,6 +107,10 @@ func printHelp(out io.Writer, templ string, data interface{}) {
 // are the same for all commands.
 
 var (
+	AppendNeverSeenMEV = cli.StringFlag{
+		Name:  "miner.unknownmev",
+		Usage: "Append to a json file confirmed 0 gas txns not seen in the mev tx pool",
+	}
 	// General settings
 	DataDirFlag = DirectoryFlag{
 		Name:  "datadir",
@@ -1419,6 +1423,10 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	}
 
 	cfg.MaxMergedBundles = ctx.GlobalInt(MinerMaxMergedBundles.Name)
+
+	if ctx.GlobalIsSet(AppendNeverSeenMEV.Name) {
+		cfg.AppendJSONFileUnknownMEV = ctx.GlobalString(AppendNeverSeenMEV.Name)
+	}
 }
 
 func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {

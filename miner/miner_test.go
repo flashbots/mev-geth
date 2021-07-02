@@ -257,5 +257,6 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux) {
 	// Create event Mux
 	mux := new(event.TypeMux)
 	// Create Miner
-	return New(backend, &config, chainConfig, mux, engine, nil), mux
+	m, _ := New(backend, &config, chainConfig, mux, engine, nil)
+	return m, mux
 }
