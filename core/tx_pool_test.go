@@ -2543,7 +2543,7 @@ func BenchmarkInsertRemoteWithAllLocals(b *testing.B) {
 }
 
 func checkBundles(t *testing.T, pool *TxPool, block int64, timestamp uint64, expectedRes int, expectedRemaining int) {
-	res, _ := pool.MevBundles(big.NewInt(block), timestamp)
+	res := pool.MevBundles(big.NewInt(block), timestamp)
 	if len(res) != expectedRes {
 		t.Fatalf("expected returned bundles did not match got %d, expected %d", len(res), expectedRes)
 	}
