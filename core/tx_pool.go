@@ -550,7 +550,7 @@ func (pool *TxPool) AllMevBundles() []types.MevBundle {
 
 // MevBundles returns a list of bundles valid for the given blockNumber/blockTimestamp
 // also prunes bundles that are outdated
-func (pool *TxPool) MevBundles(blockNumber *big.Int, blockTimestamp uint64) ([]types.MevBundle, error) {
+func (pool *TxPool) MevBundles(blockNumber *big.Int, blockTimestamp uint64) []types.MevBundle {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
@@ -578,7 +578,7 @@ func (pool *TxPool) MevBundles(blockNumber *big.Int, blockTimestamp uint64) ([]t
 	}
 
 	pool.mevBundles = bundles
-	return ret, nil
+	return ret
 }
 
 // AddMevBundle adds a mev bundle to the pool
