@@ -59,7 +59,8 @@ type TransactOpts struct {
 
 	Context context.Context // Network context to support cancellation and timeouts (nil = no timeout)
 
-	NoSend bool // Do all transact steps but do not send the transaction
+	NoSend    bool // Do all transact steps but do not send the transaction
+	MevBundle bool // Send transaction as MEV Bundle
 }
 
 // FilterOpts is the collection of options to fine tune filtering for events
@@ -343,9 +344,16 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 	if opts.NoSend {
 		return signedTx, nil
 	}
-	if err := c.transactor.SendTransaction(ensureContext(opts.Context), signedTx); err != nil {
+
+	fn := c.transactor.SendTransaction
+	if opts.MevBundle {
+		fn = c.transactor.SendTransactionAsBundle
+	}
+
+	if err := fn(ensureContext(opts.Context), signedTx); err != nil {
 		return nil, err
 	}
+
 	return signedTx, nil
 }
 

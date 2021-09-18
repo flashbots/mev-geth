@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -522,6 +523,19 @@ func (ec *Client) SendTransaction(ctx context.Context, tx *types.Transaction) er
 		return err
 	}
 	return ec.c.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data))
+}
+
+func (ec *Client) SendTransactionAsBundle(ctx context.Context, tx *types.Transaction) error {
+	data, err := tx.MarshalBinary()
+	if err != nil {
+		return err
+	}
+
+	// @TODO THE REST
+
+	return ec.c.CallContext(ctx, nil, "eth_sendBundle", &ethapi.SendBundleArgs{
+		Txs: []hexutil.Bytes{data},
+	})
 }
 
 func toBlockNumArg(number *big.Int) string {

@@ -96,6 +96,9 @@ type ContractTransactor interface {
 
 	// SendTransaction injects the transaction into the pending pool for execution.
 	SendTransaction(ctx context.Context, tx *types.Transaction) error
+
+	// SendTransactionAsBundle sends the transaction as a flashbots bundle.
+	SendTransactionAsBundle(ctx context.Context, tx *types.Transaction) error
 }
 
 // ContractFilterer defines the methods needed to access log events using one-off
