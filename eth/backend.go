@@ -290,7 +290,7 @@ func loadRPCPlugins(plugins []string, eth *Ethereum) []rpc.API {
 			continue
 		}
 
-		api, ok := v.(rpc.Plugin)
+		api, ok := v.(Plugin)
 		if !ok {
 			// @TODO
 			continue
