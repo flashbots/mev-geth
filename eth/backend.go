@@ -296,11 +296,10 @@ func loadRPCPlugins(plugins []string, eth *Ethereum) []rpc.API {
 			continue
 		}
 
-		api.Register(eth)
 		apis = append(apis, rpc.API{
 			Namespace: api.Namespace(),
 			Version:   api.Version(),
-			Service:   api,
+			Service:   api.Service(eth),
 			Public:    true,
 		})
 	}
@@ -604,5 +603,5 @@ func (s *Ethereum) Stop() error {
 type Plugin interface {
 	Namespace() string
 	Version() string
-	Register(ethereum *Ethereum)
+	Service(ethereum *Ethereum) interface{}
 }
