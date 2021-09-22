@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"plugin"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -254,6 +255,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	// Register the backend on the node
 	stack.RegisterAPIs(eth.APIs())
+	stack.RegisterAPIs(loadRPCPlugins(config.RPCPlugins, eth))
 	stack.RegisterProtocols(eth.Protocols())
 	stack.RegisterLifecycle(eth)
 	// Check for unclean shutdown
@@ -270,6 +272,40 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 	return eth, nil
+}
+
+func loadRPCPlugins(plugins []string, eth *Ethereum) []rpc.API {
+	apis := make([]rpc.API, 0)
+
+	for _, path := range plugins {
+		p, err := plugin.Open(path)
+		if err != nil {
+			// @TODO
+			continue
+		}
+
+		v, err := p.Lookup("Register")
+		if err != nil {
+			// @TODO
+			continue
+		}
+
+		api, ok := v.(rpc.Plugin)
+		if !ok {
+			// @TODO
+			continue
+		}
+
+		api.Register(eth)
+		apis = append(apis, rpc.API{
+			Namespace: api.Namespace(),
+			Version:   api.Version(),
+			Service:   api,
+			Public:    true,
+		})
+	}
+
+	return apis
 }
 
 func makeExtraData(extra []byte) []byte {
@@ -562,4 +598,11 @@ func (s *Ethereum) Stop() error {
 	s.eventMux.Stop()
 
 	return nil
+}
+
+// Plugin describes an RPC endpoint that can be added to the node as a plugin.
+type Plugin interface {
+	Namespace() string
+	Version() string
+	Register(ethereum *Ethereum)
 }
