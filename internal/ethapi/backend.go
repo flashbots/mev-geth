@@ -144,6 +144,11 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 			Version:   "1.0",
 			Service:   NewPrivateTxBundleAPI(apiBackend),
 			Public:    true,
+		},{
+			Namespace: "eth",
+			Version:   "1.0",
+			Service:   NewPrivateAccountAbstractionAPI(apiBackend),
+			Public:    true,
 		},
 	}
 }

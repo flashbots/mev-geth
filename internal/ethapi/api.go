@@ -2073,6 +2073,26 @@ func toHexSlice(b [][]byte) []string {
 	return r
 }
 
+// AccountAbstraction {{{
+
+type PrivateAccountAbstractionAPI struct {
+	b Backend
+}
+
+func NewPrivateAccountAbstractionAPI(b Backend) *PrivateAccountAbstractionAPI {
+	return &PrivateAccountAbstractionAPI{b}
+}
+
+type SendUserOperationArgs struct {
+}
+
+func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, args SendUserOperationArgs) error {
+	log.Info("account abstraction rpc called", args)
+	return nil
+}
+
+// }}}
+
 // ---------------------------------------------------------------- FlashBots ----------------------------------------------------------------
 
 // PrivateTxBundleAPI offers an API for accepting bundled transactions
