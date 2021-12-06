@@ -2084,11 +2084,37 @@ func NewPrivateAccountAbstractionAPI(b Backend) *PrivateAccountAbstractionAPI {
 }
 
 type SendUserOperationArgs struct {
+	Nonce     uint64        `json:"nonce"`
+	Signature hexutil.Bytes `json:"signature"`
+
+	PreVerificationGas uint64   `json:"preVerificationGas"`
+	VerificationGas    uint64   `json:"verificationGas"`
+	CallGas            uint64   `json:"callGas"`
+	GasFeeCap          *big.Int `json:"gasFeeCap"`
+	GasTipCap          *big.Int `json:"gasTipCap"`
+
+	InitCode      hexutil.Bytes   `json:"initCode"`
+	Sender        *common.Address `json:"sender"`
+	CallData      hexutil.Bytes   `json:"callData"`
+	Paymaster     *common.Address `json:"paymaster"`
+	PaymasterData hexutil.Bytes   `json:"paymasterData"`
 }
 
 func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, args SendUserOperationArgs) error {
-	log.Info("account abstraction rpc called", args)
-	return nil
+	return s.b.SendUserOperation(ctx, &types.UserOperation{
+		Nonce:              args.Nonce,
+		Signature:          args.Signature,
+		PreVerificationGas: args.PreVerificationGas,
+		VerificationGas:    args.VerificationGas,
+		CallGas:            args.CallGas,
+		GasFeeCap:          args.GasFeeCap,
+		GasTipCap:          args.GasTipCap,
+		InitCode:           args.InitCode,
+		Sender:             args.Sender,
+		CallData:           args.CallData,
+		Paymaster:          args.Paymaster,
+		PaymasterData:      args.PaymasterData,
+	})
 }
 
 // }}}
