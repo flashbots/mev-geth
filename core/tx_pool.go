@@ -571,22 +571,26 @@ func (pool *TxPool) Pending(enforceTips bool) map[common.Address]types.Transacti
 // AddUserOperation adds a user operation to the pool
 func (pool *TxPool) AddUserOperation(userOperation *types.UserOperation) error {
 	if _, ok := pool.userOperations[*userOperation.Sender]; ok {
+		log.Trace("Discarding user operation as there is already another one in the pool with same sender")
 		return ErrSenderUserOperationInPool
 	}
 
 	simulatedUserOperation, err := SimulateUserOperation(userOperation)
 	if err != nil {
+		log.Trace("Discarding user operation as it didn't pass simulation")
 		return err
 	}
 
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
-	pool.userOperations[*userOperation.Sender] = simulatedUserOperation
+
+	log.Trace("Add user operation to the pool")
+	pool.userOperations[*userOperation.Sender] = *simulatedUserOperation
 	return nil
 }
 
-func SimulateUserOperation(userOperation *types.UserOperation) (types.SimulatedUserOperation, error) {
-	return types.SimulatedUserOperation{
+func SimulateUserOperation(userOperation *types.UserOperation) (*types.SimulatedUserOperation, error) {
+	return &types.SimulatedUserOperation{
 		UserOperation: *userOperation,
 		AccessList:    types.NewUserOperationAccessList(),
 	}, nil
