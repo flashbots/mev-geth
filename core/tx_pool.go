@@ -299,6 +299,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		queue:           make(map[common.Address]*txList),
 		beats:           make(map[common.Address]time.Time),
 		megabundles:     make(map[common.Address]types.MevBundle),
+		userOperations:  make(map[common.Address]types.SimulatedUserOperation),
 		all:             newTxLookup(),
 		chainHeadCh:     make(chan ChainHeadEvent, chainHeadChanSize),
 		reqResetCh:      make(chan *txpoolResetRequest),
