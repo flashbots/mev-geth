@@ -85,6 +85,10 @@ var (
 	// than some meaningful limit a user might use. This is not a consensus error
 	// making the transaction invalid, rather a DOS protection.
 	ErrOversizedData = errors.New("oversized data")
+
+	// ErrSenderUserOperationInPool is returned if the pool already contains a
+	// user operation with the given sender.
+	ErrSenderUserOperationInPool = errors.New("oversized data")
 )
 
 var (
@@ -253,13 +257,14 @@ type TxPool struct {
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
 	journal *txJournal  // Journal of local transaction to back up to disk
 
-	pending     map[common.Address]*txList   // All currently processable transactions
-	queue       map[common.Address]*txList   // Queued but non-processable transactions
-	beats       map[common.Address]time.Time // Last heartbeat from each known account
-	mevBundles  []types.MevBundle
-	megabundles map[common.Address]types.MevBundle // One megabundle per each trusted relay
-	all         *txLookup                          // All transactions to allow lookups
-	priced      *txPricedList                      // All transactions sorted by price
+	pending        map[common.Address]*txList                      // All currently processable transactions
+	queue          map[common.Address]*txList                      // Queued but non-processable transactions
+	beats          map[common.Address]time.Time                    // Last heartbeat from each known account
+	userOperations map[common.Address]types.SimulatedUserOperation // One UserOperations per sender
+	mevBundles     []types.MevBundle
+	megabundles    map[common.Address]types.MevBundle // One megabundle per each trusted relay
+	all            *txLookup                          // All transactions to allow lookups
+	priced         *txPricedList                      // All transactions sorted by price
 
 	chainHeadCh     chan ChainHeadEvent
 	chainHeadSub    event.Subscription
@@ -560,6 +565,30 @@ func (pool *TxPool) Pending(enforceTips bool) map[common.Address]types.Transacti
 		}
 	}
 	return pending
+}
+
+// AddUserOperation adds a user operation to the pool
+func (pool *TxPool) AddUserOperation(userOperation *types.UserOperation) error {
+	if _, ok := pool.userOperations[*userOperation.Sender]; ok {
+		return ErrSenderUserOperationInPool
+	}
+
+	simulatedUserOperation, err := SimulateUserOperation(userOperation)
+	if err != nil {
+		return err
+	}
+
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	pool.userOperations[*userOperation.Sender] = simulatedUserOperation
+	return nil
+}
+
+func SimulateUserOperation(userOperation *types.UserOperation) (types.SimulatedUserOperation, error) {
+	return types.SimulatedUserOperation{
+		UserOperation: *userOperation,
+		AccessList:    types.NewUserOperationAccessList(),
+	}, nil
 }
 
 /// AllMevBundles returns all the MEV Bundles currently in the pool

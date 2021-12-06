@@ -19,7 +19,6 @@ package les
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/big"
 	"time"
 
@@ -201,8 +200,7 @@ func (b *LesApiBackend) RemoveTx(txHash common.Hash) {
 }
 
 func (b *LesApiBackend) SendUserOperation(ctx context.Context, userOp *types.UserOperation) error {
-	fmt.Println("user operation added to pool from LesApiBackend", userOp)
-	return nil
+	return b.eth.txPool.AddUserOperation(userOp)
 }
 
 func (b *LesApiBackend) SendBundle(ctx context.Context, txs types.Transactions, blockNumber rpc.BlockNumber, minTimestamp uint64, maxTimestamp uint64, revertingTxHashes []common.Hash) error {

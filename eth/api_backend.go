@@ -19,7 +19,6 @@ package eth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/big"
 	"time"
 
@@ -241,8 +240,7 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 }
 
 func (b *EthAPIBackend) SendUserOperation(ctx context.Context, userOp *types.UserOperation) error {
-	fmt.Println("user operation added to pool from EthApiBackend", userOp)
-	return nil
+	return b.eth.txPool.AddUserOperation(userOp)
 }
 
 func (b *EthAPIBackend) SendBundle(ctx context.Context, txs types.Transactions, blockNumber rpc.BlockNumber, minTimestamp uint64, maxTimestamp uint64, revertingTxHashes []common.Hash) error {

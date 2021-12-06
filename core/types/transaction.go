@@ -653,6 +653,17 @@ type UserOperation struct {
 	PaymasterData []byte
 }
 
+type SimulatedUserOperation struct {
+	UserOperation
+	AccessList UserOperationAcessList
+}
+
+type UserOperationAcessList map[common.Address]map[uint64]bool
+
+func NewUserOperationAccessList() UserOperationAcessList {
+	return make(map[common.Address]map[uint64]bool)
+}
+
 type MevBundle struct {
 	Txs               Transactions
 	BlockNumber       *big.Int
