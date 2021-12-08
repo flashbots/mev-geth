@@ -12,10 +12,9 @@ type UserOperationTracer struct {
 	accessList   accessList
 	forbiddenOps map[OpCode]uint
 
-	gasUsed             uint64
-	reverted            bool
-	mutableCall         bool
-	forbiddenOpAccessed bool
+	mutableStateAccess bool
+	mutableCall        bool
+	forbiddenOp        bool
 
 	depth   *int
 	statedb *StateDB
@@ -33,23 +32,19 @@ func NewUserOperationTracer() *UserOperationTracer {
 }
 
 func (uot *UserOperationTracer) AccessList() types.AccessList {
-    return uot.accessList.accessList()
+	return uot.accessList.accessList()
 }
 
-func (uot *UserOperationTracer) ForbiddenOpAccessed() bool {
-	return uot.forbiddenOpAccessed
-}
-
-func (uot *UserOperationTracer) GasUsed() uint64 {
-	return uot.gasUsed
-}
-
-func (uot *UserOperationTracer) Reverted() bool {
-	return uot.reverted
+func (uot *UserOperationTracer) ForbiddenOp() bool {
+	return uot.forbiddenOp
 }
 
 func (uot *UserOperationTracer) MutableCall() bool {
 	return uot.mutableCall
+}
+
+func (uot *UserOperationTracer) MutableStateAccess() bool {
+	return uot.mutableStateAccess
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
@@ -60,8 +55,6 @@ func (uot *UserOperationTracer) CaptureStart(env *EVM, from common.Address, to c
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
 func (uot *UserOperationTracer) CaptureEnd(output []byte, gasUsed uint64, t time.Duration, err error) {
-	uot.gasUsed = gasUsed
-	uot.reverted = err != nil
 }
 
 // CaptureState implements the Tracer interface to trace a single step of VM execution.
@@ -78,7 +71,7 @@ func (uot *UserOperationTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas
 
 	if _, ok := uot.forbiddenOps[op]; ok {
 		uot.forbiddenOps[op]++
-		uot.forbiddenOpAccessed = true
+		uot.forbiddenOp = true
 	}
 }
 

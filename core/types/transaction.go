@@ -636,34 +636,6 @@ func copyAddressPtr(a *common.Address) *common.Address {
 	return &cpy
 }
 
-type UserOperation struct {
-	Nonce     uint64
-	Signature []byte
-
-	PreVerificationGas uint64
-	VerificationGas    uint64
-	CallGas            uint64
-	GasTipCap          *big.Int
-	GasFeeCap          *big.Int
-
-	InitCode      []byte
-	Sender        *common.Address
-	CallData      []byte
-	Paymaster     *common.Address
-	PaymasterData []byte
-}
-
-type SimulatedUserOperation struct {
-	UserOperation
-	AccessList UserOperationAcessList
-}
-
-type UserOperationAcessList map[common.Address]map[uint64]bool
-
-func NewUserOperationAccessList() UserOperationAcessList {
-	return make(map[common.Address]map[uint64]bool)
-}
-
 type MevBundle struct {
 	Txs               Transactions
 	BlockNumber       *big.Int
