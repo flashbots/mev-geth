@@ -8,7 +8,7 @@ This repository specifically is maintained by Nethermind, however OpenGSN has [p
 ## Quick start
 
 ```
-git clone https://github.com/nethermind-eth/mev-aa-geth
+git clone https://github.com/NethermindEth/mev-aa-geth
 cd mev-aa-geth
 make geth
 ```
