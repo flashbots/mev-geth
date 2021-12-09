@@ -1,10 +1,14 @@
 package entrypoint
 
 import (
-	"os"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+)
+
+var (
+	entryPointAddr = common.HexToAddress("0x6C87B76AfA19823F423fA3cAf3a550a967181775")
 )
 
 type EntryPointContract struct {
@@ -13,20 +17,16 @@ type EntryPointContract struct {
 }
 
 func NewEntryPointContract() (*EntryPointContract, error) {
-	reader, err := os.Open("./entrypoint.json")
-	if err != nil {
-		return nil, err
-	}
-
+	reader := strings.NewReader(entrypointAbiString)
 	abi, err := abi.JSON(reader)
 	if err != nil {
 		return nil, err
 	}
 
 	return &EntryPointContract{
-        address: common.HexToAddress("0x6C87B76AfA19823F423fA3cAf3a550a967181775"),
-        abi: abi,
-    }, nil
+		address: entryPointAddr,
+		abi:     abi,
+	}, nil
 }
 
 func (entrypoint *EntryPointContract) Address() common.Address {

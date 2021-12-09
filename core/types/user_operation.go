@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	ZERO_ADDR = common.HexToAddress("0x0")
+	zeroAddr = common.HexToAddress("0x0000000000000000000000000000000000000000")
 )
 
 type UserOperation struct {
@@ -49,7 +49,7 @@ func (uo *UserOperation) ToSimulationMessage(baseFee *big.Int) (Message, error) 
 	}
 
 	return NewMessage(
-		ZERO_ADDR, &addr, 0, new(big.Int),
+		zeroAddr, &addr, 0, new(big.Int),
 		uo.VerificationGas, gasPrice, uo.GasFeeCap, uo.GasTipCap,
 		data, nil, true,
 	), nil
