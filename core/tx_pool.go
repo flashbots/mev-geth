@@ -18,7 +18,6 @@ package core
 
 import (
 	"errors"
-	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -28,11 +27,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/prque"
-	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
@@ -157,11 +154,6 @@ type blockChain interface {
 	GetBlock(hash common.Hash, number uint64) *types.Block
 	StateAt(root common.Hash) (*state.StateDB, error)
 
-	// Engine retrieves the chain's consensus engine.
-	Engine() consensus.Engine
-	// GetHeader returns the hash corresponding to their hash.
-	GetHeader(common.Hash, uint64) *types.Header
-
 	SubscribeChainHeadEvent(ch chan<- ChainHeadEvent) event.Subscription
 }
 
@@ -269,10 +261,10 @@ type TxPool struct {
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
 	journal *txJournal  // Journal of local transaction to back up to disk
 
-	pending        map[common.Address]*txList                       // All currently processable transactions
-	queue          map[common.Address]*txList                       // Queued but non-processable transactions
-	beats          map[common.Address]time.Time                     // Last heartbeat from each known account
-	userOperations map[common.Address]*types.SimulatedUserOperation // One UserOperations per sender
+	pending        map[common.Address]*txList              // All currently processable transactions
+	queue          map[common.Address]*txList              // Queued but non-processable transactions
+	beats          map[common.Address]time.Time            // Last heartbeat from each known account
+	userOperations map[common.Address]*types.UserOperation // One UserOperations per sender
 	mevBundles     []types.MevBundle
 	megabundles    map[common.Address]types.MevBundle // One megabundle per each trusted relay
 	all            *txLookup                          // All transactions to allow lookups
@@ -311,7 +303,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		queue:           make(map[common.Address]*txList),
 		beats:           make(map[common.Address]time.Time),
 		megabundles:     make(map[common.Address]types.MevBundle),
-		userOperations:  make(map[common.Address]*types.SimulatedUserOperation),
+		userOperations:  make(map[common.Address]*types.UserOperation),
 		all:             newTxLookup(),
 		chainHeadCh:     make(chan ChainHeadEvent, chainHeadChanSize),
 		reqResetCh:      make(chan *txpoolResetRequest),
@@ -581,54 +573,22 @@ func (pool *TxPool) Pending(enforceTips bool) map[common.Address]types.Transacti
 }
 
 // AddUserOperation adds a user operation to the pool
-func (pool *TxPool) AddUserOperation(userOperation *types.UserOperation) error {
-	if _, ok := pool.userOperations[*userOperation.Sender]; ok {
+//
+//  NOTE:
+// Right now simulation is done in the api_backend. Maybe it'd more appropriate
+// to do it here, but it would create a cyclic dependency with `package runtime`
+func (pool *TxPool) AddUserOperation(userOp *types.UserOperation) error {
+	if _, ok := pool.userOperations[*userOp.Sender]; ok {
 		log.Trace("Discarding user operation as there is already another one in the pool with same sender")
 		return ErrSenderUserOperationInPool
-	}
-
-	simulated, err := pool.SimulateUserOperation(userOperation)
-	if err != nil {
-		log.Trace("Discarding user operation as it didn't pass simulation")
-		return err
 	}
 
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
 	log.Trace("Adding user operation to the pool")
-	pool.userOperations[*userOperation.Sender] = simulated
+	pool.userOperations[*userOp.Sender] = userOp
 	return nil
-}
-
-func (pool *TxPool) SimulateUserOperation(userOperation *types.UserOperation) (*types.SimulatedUserOperation, error) {
-	header := pool.chain.CurrentBlock().Header()
-	msg, err := userOperation.ToSimulationMessage(header.BaseFee)
-	if err != nil {
-		return nil, fmt.Errorf("Couldn't simulate user operation because of (err: %v)", err)
-	}
-
-	statedb := pool.currentState.Copy()
-	tracer := vm.NewUserOperationTracer()
-	vmConfig := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
-	txContext := NewEVMTxContext(msg)
-	blockContext := NewEVMBlockContext(header, pool.chain, nil)
-	vmenv := vm.NewEVM(blockContext, txContext, statedb, pool.chainconfig, vmConfig)
-
-	res, err := ApplyMessage(vmenv, msg, new(GasPool).AddGas(msg.Gas()))
-	if err != nil {
-		return nil, fmt.Errorf("Couldn't simulate user operation because of (err: %v)", err)
-	}
-
-	if res.Failed() || tracer.ForbiddenOp() || tracer.MutableCall() || tracer.MutableStateAccess() {
-		return nil, ErrUserOperationSimulationFailed
-	}
-
-	return &types.SimulatedUserOperation{
-		UserOperation: userOperation,
-		AccessList:    tracer.AccessList(),
-		GasUsed:       res.UsedGas,
-	}, nil
 }
 
 /// AllMevBundles returns all the MEV Bundles currently in the pool

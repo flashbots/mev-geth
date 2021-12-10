@@ -36,3 +36,7 @@ func (entrypoint *EntryPointContract) Address() common.Address {
 func (entrypoint *EntryPointContract) ABI() abi.ABI {
 	return entrypoint.abi
 }
+
+func (entrypoint *EntryPointContract) PackSimulateValidation(arg interface{}) ([]byte, error) {
+	return entrypoint.abi.Pack("simulateValidation", arg)
+}

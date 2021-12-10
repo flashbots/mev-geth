@@ -1,11 +1,18 @@
 package vm
 
 import (
+	"errors"
 	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+)
+
+var (
+	ErrMutableStateAccess = errors.New("Mutable state accessed in user operation validation")
+	ErrMutableCall        = errors.New("Called to mutable-code contract made in user operation validation")
+	ErrForbiddenOp        = errors.New("Forbidden OpCode used in user operation validation")
 )
 
 type UserOperationTracer struct {
@@ -16,8 +23,8 @@ type UserOperationTracer struct {
 	mutableCall        bool
 	forbiddenOp        bool
 
-	entryPointSelfBalanceCount int // SELFBALANCE is called by the entrypoint twice before it starts validating paymasters
-	paymasterValidationMode bool // only check for SELFDESTRUCT or DELEGATECALL when we are checking the paymasters
+	entryPointSelfBalanceCount int  // SELFBALANCE is called by the entrypoint twice before it starts validating paymasters
+	paymasterValidationMode    bool // only check for SELFDESTRUCT or DELEGATECALL when we are checking the paymasters
 
 	depth   *int
 	statedb *StateDB
@@ -49,6 +56,19 @@ func (uot *UserOperationTracer) MutableCall() bool {
 
 func (uot *UserOperationTracer) MutableStateAccess() bool {
 	return uot.mutableStateAccess
+}
+
+func (uot *UserOperationTracer) Err() error {
+	switch {
+	case uot.ForbiddenOp():
+        return ErrForbiddenOp
+    case uot.MutableCall():
+        return ErrMutableCall
+    case uot.MutableStateAccess():
+        return ErrMutableStateAccess
+    default:
+        return nil
+	}
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
@@ -121,3 +141,4 @@ func containsSelfDestructOrDelegateCall(db *StateDB, address common.Address) boo
 	}
 	return false
 }
+

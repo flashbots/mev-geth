@@ -35,10 +35,12 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/consensus/misc"
+	"github.com/ethereum/go-ethereum/contracts/entrypoint"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/core/vm/runtime"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
@@ -2101,6 +2103,15 @@ type SendUserOperationArgs struct {
 }
 
 func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, args SendUserOperationArgs) error {
+	statedb, _, err := s.b.StateAndHeaderByNumber(ctx, rpc.PendingBlockNumber)
+	if err != nil {
+		return fmt.Errorf("Couldn't simulate user operation because of (err: %v)", err)
+	}
+	accessList, gasUsed, err := SimulateUserOperation(statedb.Copy(), s.b.ChainConfig(), &args)
+	if err != nil {
+		return err
+	}
+
 	return s.b.SendUserOperation(ctx, &types.UserOperation{
 		Nonce:              args.Nonce,
 		Signature:          args.Signature,
@@ -2114,7 +2125,41 @@ func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, ar
 		CallData:           args.CallData,
 		Paymaster:          args.Paymaster,
 		PaymasterData:      args.PaymasterData,
+
+		AccessList: accessList,
+		GasUsed:    gasUsed,
 	})
+}
+
+func SimulateUserOperation(statedb *state.StateDB, chainConfig *params.ChainConfig, args *SendUserOperationArgs) (types.AccessList, uint64, error) {
+	tracer := vm.NewUserOperationTracer()
+	config := runtime.Config{
+		ChainConfig: chainConfig,
+		GasLimit:    args.VerificationGas,
+		State:       statedb,
+		EVMConfig:   vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true},
+	}
+
+	entrypoint, err := entrypoint.NewEntryPointContract()
+	if err != nil {
+		return nil, 0, fmt.Errorf("Couldn't simulate user operation because of (err: %v)", err)
+	}
+	data, err := entrypoint.PackSimulateValidation(args)
+	if err != nil {
+		return nil, 0, fmt.Errorf("Couldn't simulate user operation because of (err: %v)", err)
+	}
+
+	_, gasLeft, err := runtime.Call(entrypoint.Address(), data, &config)
+	gasUsed := args.VerificationGas - gasLeft
+	if err != nil {
+		return nil, gasUsed, fmt.Errorf("User operation simulation failed because of (err: %v)", err)
+	}
+	tracerErr := tracer.Err()
+	if tracerErr != nil {
+		return nil, gasUsed, tracerErr
+	}
+
+	return tracer.AccessList(), gasUsed, nil
 }
 
 // }}}
