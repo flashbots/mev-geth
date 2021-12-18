@@ -227,3 +227,57 @@ func TestUserOperationTracerFailsIfBannedOpCodeIsUsedWhenCallDepthIsMoreThanOne(
 		})
 	}
 }
+
+func TestUserOperationTracerSucceedsIfBannedOpCodeIsUsedWhenCallDepthIsOne(t *testing.T) {
+	args := []struct {
+		opCode        OpCode
+		shouldSucceed bool
+	}{
+		{GASPRICE, true},
+		{GASLIMIT, true},
+		{DIFFICULTY, true},
+		{TIMESTAMP, true},
+		{BASEFEE, true},
+		{BLOCKHASH, true},
+		{NUMBER, true},
+		{BALANCE, true},
+		{SELFBALANCE, true},
+		{ORIGIN, true},
+		{BALANCE, true},
+	}
+
+	for _, arg := range args {
+		t.Run(fmt.Sprintf("{OpCode=%v}", arg.opCode), func(t *testing.T) {
+			statedb := newStateDB()
+			chainConfig := newChainConfig()
+			tracer, evm := newTracedEVM(statedb, chainConfig)
+
+			callee := common.BytesToAddress([]byte("callee"))
+			statedb.CreateAccount(callee)
+
+			calleeCode := []byte{
+				byte(PUSH1),
+				0x01,
+				byte(PUSH1),
+				0x69,
+				byte(arg.opCode),
+			}
+
+			statedb.SetCode(callee, calleeCode)
+
+			_, _, err := evm.Call(AccountRef(evm.TxContext.Origin), callee, []byte{}, 100000, big.NewInt(0))
+			tracerErr := tracer.Err()
+
+			if arg.shouldSucceed {
+				if err != nil {
+					t.Fatalf("Call should succeed but excecution reverted with (err: %v)", err)
+				}
+				if tracerErr != nil {
+					t.Fatalf("Call should succeed but tracer reported error (err: %v)", tracerErr)
+				}
+			} else if err == nil && tracerErr == nil {
+				t.Fatalf("Call should fail but neither excecution reverted nor the tracer reported an error (tracer: {paymasterValidationMode: %v})", tracer.paymasterValidationMode)
+			}
+		})
+	}
+}
