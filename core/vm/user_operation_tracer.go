@@ -61,13 +61,13 @@ func (uot *UserOperationTracer) MutableStateAccess() bool {
 func (uot *UserOperationTracer) Err() error {
 	switch {
 	case uot.ForbiddenOp():
-        return ErrForbiddenOp
-    case uot.MutableCall():
-        return ErrMutableCall
-    case uot.MutableStateAccess():
-        return ErrMutableStateAccess
-    default:
-        return nil
+		return ErrForbiddenOp
+	case uot.MutableCall():
+		return ErrMutableCall
+	case uot.MutableStateAccess():
+		return ErrMutableStateAccess
+	default:
+		return nil
 	}
 }
 
@@ -112,13 +112,10 @@ func (uot *UserOperationTracer) CaptureFault(env *EVM, pc uint64, op OpCode, gas
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
 func (uot *UserOperationTracer) CaptureEnter(op OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
-	depth := *uot.depth
-	if depth >= 2 {
-		// check for mutable code (selfdestruct or delegatecall) in contract being called ONLY IF we are validating the paymaster
-		if uot.paymasterValidationMode {
-			if containsSelfDestructOrDelegateCall(uot.statedb, to) {
-				uot.mutableCall = true
-			}
+	// check for mutable code (selfdestruct or delegatecall) in contract being called ONLY IF we are validating the paymaster
+	if uot.paymasterValidationMode {
+		if containsSelfDestructOrDelegateCall(uot.statedb, to) {
+			uot.mutableCall = true
 		}
 	}
 }
@@ -141,4 +138,3 @@ func containsSelfDestructOrDelegateCall(db *StateDB, address common.Address) boo
 	}
 	return false
 }
-
