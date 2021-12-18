@@ -98,6 +98,9 @@ func (uot *UserOperationTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas
 	if (op == SLOAD || op == SSTORE) && stack.len() >= 1 {
 		slot := common.Hash(stack.data[stack.len()-1].Bytes32())
 		uot.accessList.addSlot(scope.Contract.Address(), slot)
+		if depth > 2 {
+			uot.mutableStateAccess = true
+		}
 	}
 
 	if _, ok := uot.forbiddenOps[op]; ok {
