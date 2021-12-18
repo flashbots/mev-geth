@@ -155,3 +155,75 @@ func TestUserOperationTracerBansSelfDestructAndDelegateCallOnlyWhenPaymasterMode
 		})
 	}
 }
+
+func TestUserOperationTracerFailsIfBannedOpCodeIsUsedWhenCallDepthIsMoreThanOne(t *testing.T) {
+	args := []struct {
+		opCode        OpCode
+		shouldSucceed bool
+	}{
+		{GASPRICE, false},
+		{GASLIMIT, false},
+		{DIFFICULTY, false},
+		{TIMESTAMP, false},
+		{BASEFEE, false},
+		{BLOCKHASH, false},
+		{NUMBER, false},
+		{BALANCE, false},
+		{SELFBALANCE, false},
+		{ORIGIN, false},
+		{BALANCE, false},
+		{DUP1, true},
+		{ISZERO, true},
+		{AND, true},
+	}
+
+	for _, arg := range args {
+		t.Run(fmt.Sprintf("{OpCode=%v}", arg.opCode), func(t *testing.T) {
+			statedb := newStateDB()
+			chainConfig := newChainConfig()
+			tracer, evm := newTracedEVM(statedb, chainConfig)
+
+			callee := common.BytesToAddress([]byte("callee"))
+			statedb.CreateAccount(callee)
+			caller := common.BytesToAddress([]byte("caller"))
+			statedb.CreateAccount(caller)
+
+			calleeCode := []byte{
+				byte(PUSH1),
+				0x01,
+				byte(PUSH1),
+				0x69,
+				byte(arg.opCode),
+			}
+
+			callerCode := []byte{}
+			for i := 0; i < 5; i++ {
+				callerCode = append(callerCode, byte(PUSH32))
+				callerCode = append(callerCode, common.Hex2BytesFixed("0x00", 32)...)
+			}
+			callerCode = append(callerCode, byte(PUSH32))
+			callerCode = append(callerCode, common.LeftPadBytes(callee.Bytes(), 32)...)
+			callerCode = append(callerCode, byte(PUSH32))
+			callerCode = append(callerCode, common.LeftPadBytes(new(big.Int).SetUint64(50000).Bytes(), 32)...)
+			callerCode = append(callerCode, byte(CALL))
+			callerCode = append(callerCode, byte(STOP))
+
+			statedb.SetCode(callee, calleeCode)
+			statedb.SetCode(caller, callerCode)
+
+			_, _, err := evm.Call(AccountRef(evm.TxContext.Origin), caller, []byte{}, 100000, big.NewInt(0))
+			tracerErr := tracer.Err()
+
+			if arg.shouldSucceed {
+				if err != nil {
+					t.Fatalf("Call should succeed but excecution reverted with (err: %v)", err)
+				}
+				if tracerErr != nil {
+					t.Fatalf("Call should succeed but tracer reported error (err: %v)", tracerErr)
+				}
+			} else if err == nil && tracerErr == nil {
+				t.Fatalf("Call should fail but neither excecution reverted nor the tracer reported an error (tracer: {paymasterValidationMode: %v})", tracer.paymasterValidationMode)
+			}
+		})
+	}
+}
