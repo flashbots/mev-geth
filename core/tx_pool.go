@@ -18,6 +18,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -85,14 +86,6 @@ var (
 	// than some meaningful limit a user might use. This is not a consensus error
 	// making the transaction invalid, rather a DOS protection.
 	ErrOversizedData = errors.New("oversized data")
-
-	// ErrSenderUserOperationInPool is returned if the pool already contains a
-	// user operation with the given sender.
-	ErrSenderUserOperationInPool = errors.New("oversized data")
-
-	// ErrUserOperationSimulationFailed is returned if the simulation of the
-	// user operation fails, and prevents it from being added to the pool
-	ErrUserOperationSimulationFailed = errors.New("Simulation of user operation failed before adding to pool")
 )
 
 var (
@@ -261,14 +254,13 @@ type TxPool struct {
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
 	journal *txJournal  // Journal of local transaction to back up to disk
 
-	pending        map[common.Address]*txList              // All currently processable transactions
-	queue          map[common.Address]*txList              // Queued but non-processable transactions
-	beats          map[common.Address]time.Time            // Last heartbeat from each known account
-	userOperations map[common.Address]*types.UserOperation // One UserOperations per sender
-	mevBundles     []types.MevBundle
-	megabundles    map[common.Address]types.MevBundle // One megabundle per each trusted relay
-	all            *txLookup                          // All transactions to allow lookups
-	priced         *txPricedList                      // All transactions sorted by price
+	pending     map[common.Address]*txList   // All currently processable transactions
+	queue       map[common.Address]*txList   // Queued but non-processable transactions
+	beats       map[common.Address]time.Time // Last heartbeat from each known account
+	mevBundles  []types.MevBundle
+	megabundles map[common.Address]types.MevBundle // One megabundle per each trusted relay
+	all         *txLookup                          // All transactions to allow lookups
+	priced      *txPricedList                      // All transactions sorted by price
 
 	chainHeadCh     chan ChainHeadEvent
 	chainHeadSub    event.Subscription
@@ -303,7 +295,6 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		queue:           make(map[common.Address]*txList),
 		beats:           make(map[common.Address]time.Time),
 		megabundles:     make(map[common.Address]types.MevBundle),
-		userOperations:  make(map[common.Address]*types.UserOperation),
 		all:             newTxLookup(),
 		chainHeadCh:     make(chan ChainHeadEvent, chainHeadChanSize),
 		reqResetCh:      make(chan *txpoolResetRequest),
@@ -570,25 +561,6 @@ func (pool *TxPool) Pending(enforceTips bool) map[common.Address]types.Transacti
 		}
 	}
 	return pending
-}
-
-// AddUserOperation adds a user operation to the pool
-//
-//  NOTE:
-// Right now simulation is done in the api_backend. Maybe it'd more appropriate
-// to do it here, but it would create a cyclic dependency with `package runtime`
-func (pool *TxPool) AddUserOperation(userOp *types.UserOperation) error {
-	if _, ok := pool.userOperations[*userOp.Sender]; ok {
-		log.Trace("Discarding user operation as there is already another one in the pool with same sender")
-		return ErrSenderUserOperationInPool
-	}
-
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-
-	log.Trace("Adding user operation to the pool")
-	pool.userOperations[*userOp.Sender] = userOp
-	return nil
 }
 
 /// AllMevBundles returns all the MEV Bundles currently in the pool

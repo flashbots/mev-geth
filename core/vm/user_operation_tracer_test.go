@@ -24,7 +24,7 @@ func newBlockCtx() BlockContext {
 			db.AddBalance(recipient, amount)
 		},
 		GetHash: func(n uint64) common.Hash {
-			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
+			return crypto.Keccak256Hash([]byte(new(big.Int).SetUint64(n).String()))
 		},
 		BlockNumber: new(big.Int),
 		Time:        big.NewInt(time.Now().Unix()),

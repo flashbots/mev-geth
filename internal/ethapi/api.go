@@ -35,12 +35,10 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/consensus/misc"
-	"github.com/ethereum/go-ethereum/contracts/entrypoint"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/core/vm/runtime"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
@@ -2086,80 +2084,39 @@ func NewPrivateAccountAbstractionAPI(b Backend) *PrivateAccountAbstractionAPI {
 }
 
 type SendUserOperationArgs struct {
-	Nonce     uint64        `json:"nonce"`
-	Signature hexutil.Bytes `json:"signature"`
+	Nonce     *hexutil.Uint64 `json:"nonce"`
+	Signature *hexutil.Bytes  `json:"signature"`
 
-	PreVerificationGas uint64   `json:"preVerificationGas"`
-	VerificationGas    uint64   `json:"verificationGas"`
-	CallGas            uint64   `json:"callGas"`
-	GasFeeCap          *big.Int `json:"gasFeeCap"`
-	GasTipCap          *big.Int `json:"gasTipCap"`
+	PreVerificationGas *hexutil.Uint64 `json:"preVerificationGas"`
+	VerificationGas    *hexutil.Uint64 `json:"verificationGas"`
+	CallGas            *hexutil.Uint64 `json:"callGas"`
+	GasFeeCap          *hexutil.Big    `json:"maxFeePerGas"`
+	GasTipCap          *hexutil.Big    `json:"maxPriorityFeePerGas"`
 
-	InitCode      hexutil.Bytes   `json:"initCode"`
+	InitCode      *hexutil.Bytes  `json:"initCode"`
 	Sender        *common.Address `json:"sender"`
-	CallData      hexutil.Bytes   `json:"callData"`
+	CallData      *hexutil.Bytes  `json:"callData"`
 	Paymaster     *common.Address `json:"paymaster"`
-	PaymasterData hexutil.Bytes   `json:"paymasterData"`
+	PaymasterData *hexutil.Bytes  `json:"paymasterData"`
 }
 
 func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, args SendUserOperationArgs) error {
-	statedb, _, err := s.b.StateAndHeaderByNumber(ctx, rpc.PendingBlockNumber)
-	if err != nil {
-		return fmt.Errorf("Couldn't simulate user operation because of (err: %v)", err)
-	}
-	accessList, gasUsed, err := SimulateUserOperation(statedb.Copy(), s.b.ChainConfig(), &args)
-	if err != nil {
-		return err
-	}
-
-	return s.b.SendUserOperation(ctx, &types.UserOperation{
-		Nonce:              args.Nonce,
-		Signature:          args.Signature,
-		PreVerificationGas: args.PreVerificationGas,
-		VerificationGas:    args.VerificationGas,
-		CallGas:            args.CallGas,
-		GasFeeCap:          args.GasFeeCap,
-		GasTipCap:          args.GasTipCap,
-		InitCode:           args.InitCode,
-		Sender:             args.Sender,
-		CallData:           args.CallData,
-		Paymaster:          args.Paymaster,
-		PaymasterData:      args.PaymasterData,
-
-		AccessList: accessList,
-		GasUsed:    gasUsed,
-	})
-}
-
-func SimulateUserOperation(statedb *state.StateDB, chainConfig *params.ChainConfig, args *SendUserOperationArgs) (types.AccessList, uint64, error) {
-	tracer := vm.NewUserOperationTracer()
-	config := runtime.Config{
-		ChainConfig: chainConfig,
-		GasLimit:    args.VerificationGas,
-		State:       statedb,
-		EVMConfig:   vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true},
-	}
-
-	entrypoint, err := entrypoint.NewEntryPointContract()
-	if err != nil {
-		return nil, 0, fmt.Errorf("Couldn't simulate user operation because of (err: %v)", err)
-	}
-	data, err := entrypoint.PackSimulateValidation(args)
-	if err != nil {
-		return nil, 0, fmt.Errorf("Couldn't simulate user operation because of (err: %v)", err)
-	}
-
-	_, gasLeft, err := runtime.Call(entrypoint.Address(), data, &config)
-	gasUsed := args.VerificationGas - gasLeft
-	if err != nil {
-		return nil, gasUsed, fmt.Errorf("User operation simulation failed because of (err: %v)", err)
-	}
-	tracerErr := tracer.Err()
-	if tracerErr != nil {
-		return nil, gasUsed, tracerErr
-	}
-
-	return tracer.AccessList(), gasUsed, nil
+	// TODO This should be an rpc param
+	entryPointAddr := common.BytesToAddress([]byte("0x6fdcfF0FeDa541135Bee30F1eAa6Cf6e8A54BE79"))
+	return s.b.SendUserOperation(ctx, &types.UserOp{
+		Nonce:              uint64(*args.Nonce),
+		Signature:          *args.Signature,
+		PreVerificationGas: uint64(*args.PreVerificationGas),
+		VerificationGas:    uint64(*args.VerificationGas),
+		CallGas:            uint64(*args.CallGas),
+		GasFeeCap:          *(*big.Int)(args.GasFeeCap),
+		GasTipCap:          *(*big.Int)(args.GasTipCap),
+		InitCode:           *args.InitCode,
+		Sender:             *args.Sender,
+		CallData:           *args.CallData,
+		Paymaster:          *args.Paymaster,
+		PaymasterData:      *args.PaymasterData,
+	}, &entryPointAddr)
 }
 
 // }}}

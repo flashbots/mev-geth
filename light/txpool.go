@@ -551,11 +551,6 @@ func (pool *TxPool) RemoveTx(hash common.Hash) {
 	pool.relay.Discard([]common.Hash{hash})
 }
 
-// AddUserOperation adds a UserOperation to the pool
-func (pool *TxPool) AddUserOperation(userOperation *types.UserOperation) error {
-	return nil
-}
-
 // MevBundles returns a list of bundles valid for the given blockNumber/blockTimestamp
 // also prunes bundles that are outdated
 func (pool *TxPool) MevBundles(blockNumber *big.Int, blockTimestamp uint64) ([]types.Transactions, error) {

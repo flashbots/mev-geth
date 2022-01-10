@@ -5,38 +5,34 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
-var (
-	entryPointAddr = common.HexToAddress("0x6C87B76AfA19823F423fA3cAf3a550a967181775")
-)
-
-type EntryPointContract struct {
-	address common.Address
-	abi     abi.ABI
+type EntryPointAbi struct {
+	abi abi.ABI
 }
 
-func NewEntryPointContract() (*EntryPointContract, error) {
+func NewEntryPointAbi() *EntryPointAbi {
 	reader := strings.NewReader(entrypointAbiString)
-	abi, err := abi.JSON(reader)
-	if err != nil {
-		return nil, err
+	abi, _ := abi.JSON(reader)
+
+	return &EntryPointAbi{
+		abi: abi,
 	}
-
-	return &EntryPointContract{
-		address: entryPointAddr,
-		abi:     abi,
-	}, nil
 }
 
-func (entrypoint *EntryPointContract) Address() common.Address {
-	return entrypoint.address
+func (entrypoint *EntryPointAbi) PackSimulateValidation(op *types.UserOp) ([]byte, error) {
+	return entrypoint.abi.Pack("simulateValidation", op.ToAbi())
 }
 
-func (entrypoint *EntryPointContract) ABI() abi.ABI {
-	return entrypoint.abi
+func (entrypoint *EntryPointAbi) PackHandleOp(op *types.UserOp, redeemer common.Address) ([]byte, error) {
+	return entrypoint.abi.Pack("handleOp", op.ToAbi(), redeemer)
 }
 
-func (entrypoint *EntryPointContract) PackSimulateValidation(arg interface{}) ([]byte, error) {
-	return entrypoint.abi.Pack("simulateValidation", arg)
+func (entrypoint *EntryPointAbi) PackHandleOps(ops []*types.UserOp, redeemer common.Address) ([]byte, error) {
+	userOpsAbi := make([]*types.UserOpAbi, len(ops))
+	for i := range ops {
+		userOpsAbi[i] = ops[i].ToAbi()
+	}
+	return entrypoint.abi.Pack("handleOps", userOpsAbi, redeemer)
 }
