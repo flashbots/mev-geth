@@ -105,7 +105,6 @@ func NewUserOpPool(config UserOpPoolConfig, txPool *TxPool, accountManager *acco
 	}
 
 	pool.chainHeadSub = pool.txPool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
-	pool.bundleTicker = time.NewTicker(10)
 	pool.wg.Add(1)
 	go pool.mainLoop()
 
@@ -124,12 +123,6 @@ func (pool *UserOpPool) mainLoop() {
 				for entryPointAddr := range pool.byEntryPoint {
 					go pool.bundleByEntryPoint(ev.Block, &entryPointAddr)
 				}
-			}
-
-		case <-pool.bundleTicker.C:
-			head := pool.txPool.chain.CurrentBlock()
-			for entryPointAddr := range pool.byEntryPoint {
-				go pool.bundleByEntryPoint(head, &entryPointAddr)
 			}
 
 		case <-pool.chainHeadSub.Err():
