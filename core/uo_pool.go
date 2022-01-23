@@ -12,8 +12,10 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/contracts/entrypoint"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 const (
@@ -38,6 +40,38 @@ var (
 	ErrUserOpReSimulationFailed = errors.New("Simulation of user operation failed before adding to pool")
 )
 
+type blockChainWithContext interface {
+	blockChain
+	ChainContext
+}
+
+type mevPool interface {
+	AddMevBundle(
+		txs types.Transactions, blockNumber *big.Int,
+		minTimestamp, maxTimestamp uint64,
+		revertingTxHashes []common.Hash,
+	) error
+}
+
+type signer interface {
+	Address() common.Address
+	SignTx(tx *types.Transaction) (*types.Transaction, error)
+}
+
+type walletSigner struct {
+	wallet  accounts.Wallet
+	account accounts.Account
+	chainId *big.Int
+}
+
+func (signer walletSigner) Address() common.Address {
+	return signer.account.Address
+}
+
+func (signer walletSigner) SignTx(tx *types.Transaction) (*types.Transaction, error) {
+	return signer.wallet.SignTx(signer.account, tx, signer.chainId)
+}
+
 type UserOpPoolConfig struct {
 	signerAddr common.Address
 	maxBundles uint
@@ -49,19 +83,21 @@ type UserOpPool struct {
 
 	config UserOpPoolConfig
 
+	initDoneCh   chan struct{}
 	chainHeadCh  chan ChainHeadEvent
 	chainHeadSub event.Subscription
 	bundleTicker *time.Ticker
 
-	txPool        *TxPool
-	signerWallet  accounts.Wallet
-	signerAccount accounts.Account
+	chainConfig *params.ChainConfig
+	chain       blockChainWithContext
+	mevPool     mevPool
+	signer      signer
 
 	bySender     map[common.Address]*types.SimulatedUserOp
 	byEntryPoint map[common.Address][]*types.SimulatedUserOp
 }
 
-func NewUserOpPool(config UserOpPoolConfig, txPool *TxPool, accountManager *accounts.Manager) (*UserOpPool, error) {
+func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, chain blockChainWithContext, mevPool mevPool, accountManager *accounts.Manager) (*UserOpPool, error) {
 	var (
 		wallet  accounts.Wallet
 		account accounts.Account
@@ -94,17 +130,19 @@ func NewUserOpPool(config UserOpPoolConfig, txPool *TxPool, accountManager *acco
 	pool := &UserOpPool{
 		config: config,
 
+		initDoneCh:  make(chan struct{}),
 		chainHeadCh: make(chan ChainHeadEvent),
 
-		txPool:        txPool,
-		signerWallet:  wallet,
-		signerAccount: account,
+		chainConfig: chainConfig,
+		chain:       chain,
+		mevPool:     mevPool,
+		signer:      &walletSigner{wallet, account, chainConfig.ChainID},
 
 		bySender:     make(map[common.Address]*types.SimulatedUserOp),
 		byEntryPoint: make(map[common.Address][]*types.SimulatedUserOp),
 	}
 
-	pool.chainHeadSub = pool.txPool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
+	pool.chainHeadSub = pool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
 	pool.wg.Add(1)
 	go pool.mainLoop()
 
@@ -115,6 +153,9 @@ func NewUserOpPool(config UserOpPoolConfig, txPool *TxPool, accountManager *acco
 // outside blockchain events
 func (pool *UserOpPool) mainLoop() {
 	defer pool.wg.Done()
+
+	// let tests know we are finished initializating
+	close(pool.initDoneCh)
 
 	for {
 		select {
@@ -150,7 +191,7 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 		return ErrSenderUserOpInPool
 	}
 
-	simmed, err := pool.SimulateUserOp(userOp, entryPointAddr)
+	simmed, err := pool.simulateUserOp(userOp, entryPointAddr)
 	if err != nil {
 		log.Warn("Discarding user operation because it didn't pass simulation")
 		return err
@@ -165,23 +206,53 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 	return nil
 }
 
-func (pool *UserOpPool) newSimulator() *UserOpSimulator {
-	block := pool.txPool.chain.CurrentBlock()
-	return &UserOpSimulator{
-		BlockNumber:     block.Number(),
-		BlockDifficulty: block.Difficulty(),
-		GasLimit:        block.GasLimit(),
-		BaseFee:         block.BaseFee(),
-		GasPrice:        pool.txPool.GasPrice(),
-		StateDB:         pool.txPool.currentState.Copy(),
-		ChainConfig:     pool.txPool.chainconfig,
+func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *common.Address, block *types.Block) (types.AccessList, uint64, error) {
+	state, err := pool.chain.StateAt(block.Root())
+	if err != nil {
+		return nil, 0, err
 	}
+
+	blockCtx := NewEVMBlockContext(block.Header(), pool.chain, &common.Address{})
+	txCtx := vm.TxContext{
+		Origin:   common.Address{},
+		GasPrice: block.BaseFee(),
+	}
+	tracer := vm.NewUserOperationTracer()
+	evm := vm.NewEVM(blockCtx, txCtx, state, pool.chainConfig, vm.Config{
+		Tracer: tracer,
+		Debug:  true,
+	})
+
+	entryPoint := entrypoint.NewEntryPoint()
+	data, err := entryPoint.PackSimulateValidation(userOp)
+	if err != nil {
+		log.Error("error packing")
+		return nil, 0, err
+	}
+
+	_, gasLeft, vmErr := evm.Call(
+		vm.AccountRef(common.Address{}),
+		*entryPointAddr,
+		data,
+		userOp.VerificationGas,
+		common.Big0,
+	)
+	gasUsed := userOp.VerificationGas - gasLeft
+
+	if vmErr != nil {
+		return nil, gasUsed, vmErr
+	}
+
+	if tracerErr := tracer.Err(); tracerErr != nil {
+		return nil, gasUsed, tracerErr
+	}
+
+	return tracer.AccessList(), gasUsed, nil
 }
 
-func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *common.Address) (*types.SimulatedUserOp, error) {
-	simulator := pool.newSimulator()
-
-	accessList, gasUsed, simErr := simulator.SimulateUserOp(userOp, entryPointAddr)
+func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *common.Address) (*types.SimulatedUserOp, error) {
+	block := pool.chain.CurrentBlock()
+	accessList, gasUsed, simErr := pool.SimulateUserOp(userOp, entryPointAddr, block)
 	if simErr != nil {
 		return nil, simErr
 	}
@@ -193,10 +264,9 @@ func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *com
 	}, nil
 }
 
-func (pool *UserOpPool) ReSimulateUserOp(simmedUserOp *types.SimulatedUserOp, entryPointAddr *common.Address) error {
-	simulator := pool.newSimulator()
-
-	accessList, gasUsed, simErr := simulator.SimulateUserOp(simmedUserOp.UserOp, entryPointAddr)
+func (pool *UserOpPool) reSimulateUserOp(simmedUserOp *types.SimulatedUserOp, entryPointAddr *common.Address) error {
+	block := pool.chain.CurrentBlock()
+	accessList, gasUsed, simErr := pool.SimulateUserOp(simmedUserOp.UserOp, entryPointAddr, block)
 	if simErr != nil {
 		return simErr
 	}
@@ -230,7 +300,7 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 
 	bundlesCreated := uint(0)
 	for i, simmed := range userOpList {
-		if err := pool.ReSimulateUserOp(simmed, entryPointAddr); err != nil {
+		if err := pool.reSimulateUserOp(simmed, entryPointAddr); err != nil {
 			log.Warn("Drop user operation because it didn't pass resimulation")
 			delete(pool.bySender, simmed.Sender)
 			pool.byEntryPoint[*entryPointAddr] = append(userOpList[:i], userOpList[i+1:]...)
@@ -253,7 +323,7 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 		// TODO
 		// Not sure if this is the correct fee for the tx
 		// Maybe gasFee should be the sum of all bundled userOp gasFee
-		gasFee := misc.CalcBaseFee(pool.txPool.chainconfig, head.Header())
+		gasFee := misc.CalcBaseFee(pool.chainConfig, head.Header())
 		signedTx, err := pool.bundleIntoTx(userOps, entryPointAddr, gasFee)
 		if err != nil {
 			return err
@@ -261,7 +331,7 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 
 		log.Warn("Add bundled transaction to mev bundle pool")
 		nextBlockNumber := new(big.Int).Add(head.Number(), common.Big1)
-		if err := pool.txPool.AddMevBundle(types.Transactions{signedTx}, nextBlockNumber, 0, 0, nil); err != nil {
+		if err := pool.mevPool.AddMevBundle(types.Transactions{signedTx}, nextBlockNumber, 0, 0, nil); err != nil {
 			return err
 		}
 
@@ -277,16 +347,16 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 // bundleUserOperations checks the user operation pool and bundles
 // them into a transaction to later be wrapped in an MevBundle
 func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *common.Address, gasFee *big.Int) (*types.Transaction, error) {
-	entryPointAbi := entrypoint.NewEntryPointAbi()
+	entryPoint := entrypoint.NewEntryPoint()
 
 	var (
 		err  error
 		data []byte
 	)
 	if len(userOps) == 1 {
-		data, err = entryPointAbi.PackHandleOp(userOps[0], pool.signerAccount.Address)
+		data, err = entryPoint.PackHandleOp(userOps[0], pool.signer.Address())
 	} else {
-		data, err = entryPointAbi.PackHandleOps(userOps, pool.signerAccount.Address)
+		data, err = entryPoint.PackHandleOps(userOps, pool.signer.Address())
 	}
 	if err != nil {
 		return nil, err
@@ -297,7 +367,7 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 		gas += uo.VerificationGas + uo.CallGas + overheadGas
 	}
 
-	chainId := pool.txPool.chainconfig.ChainID
+	chainId := pool.chainConfig.ChainID
 	tx := types.NewTx(&types.DynamicFeeTx{
 		To:        entryPointAddr,
 		ChainID:   chainId,
@@ -308,7 +378,7 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 		Data:      data,
 	})
 
-	return pool.signerWallet.SignTx(pool.signerAccount, tx, chainId)
+	return pool.signer.SignTx(tx)
 }
 
 func (pool *UserOpPool) userOpsByGasLimit(gasLimit uint64, entryPointAddr *common.Address) []*types.UserOp {
@@ -325,7 +395,7 @@ func (pool *UserOpPool) userOpsByGasLimit(gasLimit uint64, entryPointAddr *commo
 	totalAccessList := types.AccessList{}
 
 	for i, simmed := range userOpList {
-		if err := pool.ReSimulateUserOp(simmed, entryPointAddr); err != nil {
+		if err := pool.reSimulateUserOp(simmed, entryPointAddr); err != nil {
 			log.Warn("Dropped user operation because it didn't pass resimulation")
 			delete(pool.bySender, simmed.Sender)
 			pool.byEntryPoint[*entryPointAddr] = append(userOpList[:i], userOpList[i+1:]...)

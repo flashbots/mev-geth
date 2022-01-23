@@ -205,7 +205,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
-	eth.userOpPool, err = core.NewUserOpPool(config.UserOpPool, eth.txPool, eth.accountManager)
+	eth.userOpPool, err = core.NewUserOpPool(config.UserOpPool, chainConfig, eth.blockchain, eth.txPool, eth.accountManager)
 	if err != nil {
 		return nil, err
 	}
