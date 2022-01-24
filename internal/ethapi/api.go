@@ -2509,6 +2509,13 @@ func (s *BundleAPI) EstimateGasBundle(ctx context.Context, args EstimateGasBundl
 		jsonResult := map[string]interface{}{
 			"gasUsed": result.UsedGas,
 		}
+		if result.Err != nil {
+			jsonResult["error"] = result.Err
+			revert := result.Revert()
+			if len(revert) > 0 {
+				jsonResult["revert"] = string(revert)
+			}
+		}
 		results = append(results, jsonResult)
 	}
 
