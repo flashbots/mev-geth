@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/contracts/aatestcontracts"
+	"github.com/ethereum/go-ethereum/contracts/entrypoint"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -68,13 +69,14 @@ func newTestUserOpPool() *UserOpPool {
 }
 
 type testAAContracts struct {
+	entryPointAddr       common.Address
 	simpleWalletAddr     common.Address
 	singletonFactoryAddr common.Address
 	testCounterAddr      common.Address
 	tokenPaymasterAddr   common.Address
 }
 
-func deployAATestContract(chain blockChainWithContext, deploymentCode []byte) (common.Address, error) {
+func deployContract(chain blockChainWithContext, deploymentCode []byte) (common.Address, error) {
 	block := chain.CurrentBlock()
 	statedb, _ := chain.StateAt(block.Hash())
 	blockCtx := NewEVMBlockContext(block.Header(), chain, &common.Address{})
@@ -84,28 +86,42 @@ func deployAATestContract(chain blockChainWithContext, deploymentCode []byte) (c
 	return addr, err
 }
 
-func deployAllAATestContracts(chain blockChainWithContext) (*testAAContracts, error) {
-	simpleWalletDeploy, err := aatestcontracts.SimpleWallet.PackDeploy()
-	singletonFactoryDeploy, err := aatestcontracts.SimpleWallet.PackDeploy()
-	testCounterDeploy, err := aatestcontracts.SimpleWallet.PackDeploy()
-	tokenPaymasterDeploy, err := aatestcontracts.SimpleWallet.PackDeploy()
-	if err != nil {
-		return nil, err
+func deployAAContracts(chain blockChainWithContext, walletUser common.Address) (*testAAContracts, error) {
+	var (
+		contracts testAAContracts
+		err       error
+	)
+
+	if deploy, err := aatestcontracts.SingletonFactory.PackDeploy(); err == nil {
+		contracts.singletonFactoryAddr, err = deployContract(chain, deploy)
+	}
+	if deploy, err := entrypoint.Contract.PackDeploy(contracts.singletonFactoryAddr, common.Big0, common.Big0); err == nil {
+		contracts.entryPointAddr, err = deployContract(chain, deploy)
+	}
+	if deploy, err := aatestcontracts.SimpleWallet.PackDeploy(contracts.entryPointAddr, walletUser); err == nil {
+		contracts.simpleWalletAddr, err = deployContract(chain, deploy)
+	}
+	if deploy, err := aatestcontracts.TestCounter.PackDeploy(); err == nil {
+		contracts.testCounterAddr, err = deployContract(chain, deploy)
+	}
+	if deploy, err := aatestcontracts.TokenPaymaster.PackDeploy("symbol", contracts.entryPointAddr); err == nil {
+		contracts.tokenPaymasterAddr, err = deployContract(chain, deploy)
 	}
 
-	simpleWalletAddr, err := deployAATestContract(chain, simpleWalletDeploy)
-	singletonFactoryAddr, err := deployAATestContract(chain, singletonFactoryDeploy)
-	testCounterAddr, err := deployAATestContract(chain, testCounterDeploy)
-	tokenPaymasterAddr, err := deployAATestContract(chain, tokenPaymasterDeploy)
-	return &testAAContracts{
-		simpleWalletAddr:     simpleWalletAddr,
-		singletonFactoryAddr: singletonFactoryAddr,
-		testCounterAddr:      testCounterAddr,
-		tokenPaymasterAddr:   tokenPaymasterAddr,
-	}, err
+	return &contracts, err
 }
 
-func newUserOpThatIncCounter(walletAddr common.Address) types.UserOp {
+func newUserOpThatIncCounter(contracts *testAAContracts) (types.UserOp, error) {
+	countCallData, err := aatestcontracts.TestCounter.PackCount()
+	if err != nil {
+		return types.UserOp{}, nil
+	}
+
+	execFromEntryPointCallData, err := aatestcontracts.SimpleWallet.PackExecFromEntryPoint(contracts.testCounterAddr, common.Big0, countCallData)
+	if err != nil {
+		return types.UserOp{}, nil
+	}
+
 	return types.UserOp{
 		Signature: []byte{},
 
@@ -116,20 +132,25 @@ func newUserOpThatIncCounter(walletAddr common.Address) types.UserOp {
 		GasFeeCap:          *common.Big0,
 
 		InitCode:      []byte{},
-		Sender:        walletAddr,
-		CallData:      []byte{},
+		Sender:        contracts.simpleWalletAddr,
+		CallData:      execFromEntryPointCallData,
 		Paymaster:     common.Address{},
 		PaymasterData: []byte{},
-	}
+	}, nil
 }
 
 func TestSimulateUserOp(t *testing.T) {
 	pool := newTestUserOpPool()
-	contracts, err := deployAllAATestContracts(pool.chain)
+	contracts, err := deployAAContracts(pool.chain, common.Address{})
 	if err != nil {
-		t.Fatalf("Couldn't deploy test account abstraction contracts")
+		t.Fatalf("Couldn't deploy account abstraction test contracts", err)
 	}
-
-	_ = contracts
-
+	userOp, err := newUserOpThatIncCounter(contracts)
+	if err != nil {
+		t.Fatalf("Error creating test UserOp", err)
+	}
+	_, _, simErr := pool.SimulateUserOp(&userOp, &contracts.entryPointAddr, pool.chain.CurrentBlock())
+	if simErr != nil {
+		t.Fatalf("Simulation of user operation failed", simErr)
+	}
 }

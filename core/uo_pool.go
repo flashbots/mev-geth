@@ -223,8 +223,7 @@ func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *com
 		Debug:  true,
 	})
 
-	entryPoint := entrypoint.NewEntryPoint()
-	data, err := entryPoint.PackSimulateValidation(userOp)
+	data, err := entrypoint.Contract.PackSimulateValidation(userOp)
 	if err != nil {
 		log.Error("error packing")
 		return nil, 0, err
@@ -347,16 +346,14 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 // bundleUserOperations checks the user operation pool and bundles
 // them into a transaction to later be wrapped in an MevBundle
 func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *common.Address, gasFee *big.Int) (*types.Transaction, error) {
-	entryPoint := entrypoint.NewEntryPoint()
-
 	var (
 		err  error
 		data []byte
 	)
 	if len(userOps) == 1 {
-		data, err = entryPoint.PackHandleOp(userOps[0], pool.signer.Address())
+		data, err = entrypoint.Contract.PackHandleOp(userOps[0], pool.signer.Address())
 	} else {
-		data, err = entryPoint.PackHandleOps(userOps, pool.signer.Address())
+		data, err = entrypoint.Contract.PackHandleOps(userOps, pool.signer.Address())
 	}
 	if err != nil {
 		return nil, err

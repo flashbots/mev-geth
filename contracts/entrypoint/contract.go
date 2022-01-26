@@ -16,7 +16,7 @@ type EntryPoint struct {
 	Bytecode hexutil.Bytes
 }
 
-func NewEntryPoint() *EntryPoint {
+func NewEntryPoint(artifact string) EntryPoint {
 	reader := strings.NewReader(entryPointArtifact)
 	dec := json.NewDecoder(reader)
 
@@ -24,7 +24,7 @@ func NewEntryPoint() *EntryPoint {
 	if err := dec.Decode(&entryPoint); err != nil {
 		panic(err)
 	}
-	return &entryPoint
+	return entryPoint
 }
 
 func (entryPoint *EntryPoint) PackDeploy(create2Factory common.Address, perOpOverhead *big.Int, unstakeDelayBlocks *big.Int) ([]byte, error) {
@@ -46,3 +46,5 @@ func (entryPoint *EntryPoint) PackHandleOps(ops []*types.UserOp, redeemer common
 	}
 	return entryPoint.Abi.Pack("handleOps", userOpsAbi, redeemer)
 }
+
+var Contract = NewEntryPoint(entryPointArtifact)
