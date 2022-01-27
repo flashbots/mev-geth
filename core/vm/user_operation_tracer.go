@@ -84,6 +84,8 @@ func (uot *UserOperationTracer) CaptureEnd(output []byte, gasUsed uint64, t time
 // CaptureState implements the Tracer interface to trace a single step of VM execution.
 func (uot *UserOperationTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
 	if depth == 1 && op == SELFBALANCE {
+		// TODO: this is done by number, now
+		// check entry point
 		uot.entryPointSelfBalanceCount++
 		if uot.entryPointSelfBalanceCount == 2 {
 			uot.paymasterValidationMode = true

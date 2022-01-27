@@ -123,9 +123,9 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 		}
 	}
 
-	if config.maxBundles == 0 {
-		config.maxBundles = 1
-	}
+	// if config.maxBundles == 0 {
+	// 	config.maxBundles = 1
+	// }
 
 	pool := &UserOpPool{
 		config: config,
@@ -191,6 +191,8 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 		return ErrSenderUserOpInPool
 	}
 
+	// TODO: Sanity checks here, check nethermind
+
 	simmed, err := pool.simulateUserOp(userOp, entryPointAddr)
 	if err != nil {
 		log.Warn("Discarding user operation because it didn't pass simulation")
@@ -233,10 +235,10 @@ func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *com
 		vm.AccountRef(common.Address{}),
 		*entryPointAddr,
 		data,
-		userOp.VerificationGas,
+		userOp.VerificationGas, // TODO: +preVerificationGas
 		common.Big0,
 	)
-	gasUsed := userOp.VerificationGas - gasLeft
+	gasUsed := userOp.VerificationGas - gasLeft // TODO: -preVerificationGas
 
 	if vmErr != nil {
 		return nil, gasUsed, vmErr
@@ -270,7 +272,7 @@ func (pool *UserOpPool) reSimulateUserOp(simmedUserOp *types.SimulatedUserOp, en
 		return simErr
 	}
 
-	if !accessList.Equals(simmedUserOp.AccessList) || gasUsed != simmedUserOp.GasUsed {
+	if !accessList.Equals(simmedUserOp.AccessList) || gasUsed != simmedUserOp.GasUsed { // TODO: remove gasUsed
 		return ErrUserOpReSimulationFailed
 	}
 
@@ -280,7 +282,7 @@ func (pool *UserOpPool) reSimulateUserOp(simmedUserOp *types.SimulatedUserOp, en
 // bundleUserOperations checks the user operation pool and bundles
 // them into a transaction to later be wrapped in an MevBundle
 func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *common.Address) error {
-	gasLimit := head.GasLimit()
+	gasLimit := head.GasLimit() // TODO: check this
 	maxBundles := pool.config.maxBundles
 
 	pool.mu.Lock()
@@ -307,6 +309,7 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 		}
 
 		if totalGasUsed+simmed.GasUsed > gasLimit {
+			// TODO: do this earlier, before resimulation
 			continue
 		}
 
@@ -314,10 +317,10 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 			continue
 		}
 
-		totalGasUsed += simmed.GasUsed
+		totalGasUsed += simmed.PreVerificationGas + simmed.VerificationGas + simmed.CallGas
 		// totalAccessList.Extend(simmed.AccessList) // TODO
 		userOps = append(userOps, simmed.UserOp)
-		pool.byEntryPoint[*entryPointAddr] = append(userOpList[:i], userOpList[i+1:]...)
+		pool.byEntryPoint[*entryPointAddr] = append(userOpList[:i], userOpList[i+1:]...) // TODO: this should be done after inclusion in a block
 
 		// TODO
 		// Not sure if this is the correct fee for the tx
@@ -346,6 +349,7 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 // bundleUserOperations checks the user operation pool and bundles
 // them into a transaction to later be wrapped in an MevBundle
 func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *common.Address, gasFee *big.Int) (*types.Transaction, error) {
+	// TODO: eth_estimateGas: gas
 	var (
 		err  error
 		data []byte
