@@ -114,12 +114,12 @@ func deployAAContracts(chain blockChainWithContext, walletUser common.Address) (
 func newUserOpThatIncCounter(contracts *testAAContracts) (types.UserOp, error) {
 	countCallData, err := aatestcontracts.TestCounter.PackCount()
 	if err != nil {
-		return types.UserOp{}, nil
+		return types.UserOp{}, err
 	}
 
 	execFromEntryPointCallData, err := aatestcontracts.SimpleWallet.PackExecFromEntryPoint(contracts.testCounterAddr, common.Big0, countCallData)
 	if err != nil {
-		return types.UserOp{}, nil
+		return types.UserOp{}, err
 	}
 
 	return types.UserOp{
@@ -143,14 +143,14 @@ func TestSimulateUserOp(t *testing.T) {
 	pool := newTestUserOpPool()
 	contracts, err := deployAAContracts(pool.chain, common.Address{})
 	if err != nil {
-		t.Fatalf("Couldn't deploy account abstraction test contracts", err)
+		t.Fatalf("Couldn't deploy account abstraction test contracts: {%s}", err)
 	}
 	userOp, err := newUserOpThatIncCounter(contracts)
 	if err != nil {
-		t.Fatalf("Error creating test UserOp", err)
+		t.Fatalf("Error creating test UserOp: {%s}", err)
 	}
 	_, _, simErr := pool.SimulateUserOp(&userOp, &contracts.entryPointAddr, pool.chain.CurrentBlock())
 	if simErr != nil {
-		t.Fatalf("Simulation of user operation failed", simErr)
+		t.Fatalf("Simulation of user operation failed: {%s}", simErr)
 	}
 }
