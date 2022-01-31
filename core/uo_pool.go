@@ -379,39 +379,3 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 
 	return pool.signer.SignTx(tx)
 }
-
-func (pool *UserOpPool) userOpsByGasLimit(gasLimit uint64, entryPointAddr *common.Address) []*types.UserOp {
-	pool.mu.RLock()
-	defer pool.mu.Unlock()
-
-	userOpList := pool.byEntryPoint[*entryPointAddr]
-	sort.Slice(userOpList, func(i, j int) bool {
-		return userOpList[i].GasTipCap.Cmp(&userOpList[j].GasTipCap) < 0
-	})
-
-	userOps := []*types.UserOp{}
-	totalGasUsed := uint64(0)
-	totalAccessList := types.AccessList{}
-
-	for i, simmed := range userOpList {
-		if err := pool.reSimulateUserOp(simmed, entryPointAddr); err != nil {
-			log.Warn("Dropped user operation because it didn't pass resimulation")
-			pool.byEntryPoint[*entryPointAddr] = append(userOpList[:i], userOpList[i+1:]...)
-			continue
-		}
-
-		if totalGasUsed+simmed.GasUsed > gasLimit {
-			continue
-		}
-
-		if totalAccessList.Overlaps(simmed.AccessList) {
-			continue
-		}
-
-		totalGasUsed += simmed.GasUsed
-		totalAccessList.Extend(simmed.AccessList)
-		userOps = append(userOps, simmed.UserOp)
-	}
-
-	return userOps
-}
