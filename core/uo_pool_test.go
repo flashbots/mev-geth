@@ -4,7 +4,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
-	"reflect"
 	"sync/atomic"
 	"testing"
 
