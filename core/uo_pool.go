@@ -2,12 +2,14 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/contracts/entrypoint"
@@ -230,7 +232,7 @@ func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *com
 		return nil, 0, err
 	}
 
-	_, gasLeft, vmErr := evm.Call(
+	res, gasLeft, vmErr := evm.Call(
 		vm.AccountRef(common.Address{}),
 		*entryPointAddr,
 		data,
@@ -240,6 +242,18 @@ func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *com
 	gasUsed := userOp.VerificationGas - gasLeft // TODO: -preVerificationGas
 
 	if vmErr != nil {
+		if errors.Is(vmErr, vm.ErrExecutionReverted) {
+			if revert, err := abi.UnpackRevert(res); err == nil {
+				vmErr = fmt.Errorf("%w %s", err, revert)
+			} else {
+				customErr := entrypoint.Contract.Abi.Errors["FailedOp"]
+				if args, err := customErr.Unpack(res); err == nil {
+					vmErr = fmt.Errorf("%w %s with args %v", err, customErr.Sig, args)
+				} else {
+					vmErr = fmt.Errorf("%w %s", err, customErr.Sig)
+				}
+			}
+		}
 		return nil, gasUsed, vmErr
 	}
 
