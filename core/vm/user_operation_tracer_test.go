@@ -69,7 +69,7 @@ func newChainConfig() *params.ChainConfig {
 func newTracedEVM(statedb StateDB, chainConfig *params.ChainConfig) (*UserOperationTracer, *EVM) {
 	blockCtx := newBlockCtx()
 	txCtx := newTxCtx()
-	tracer := NewUserOperationTracer()
+	tracer := NewUserOperationTracer(common.Address{}, common.Address{}, common.Address{})
 	config := Config{
 		Tracer:    tracer,
 		Debug:     true,

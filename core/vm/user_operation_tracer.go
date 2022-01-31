@@ -16,21 +16,20 @@ var (
 )
 
 type UserOperationTracer struct {
-	accessList   accessList
-	forbiddenOps map[OpCode]uint
+	accessList                     accessList
+	forbiddenOps                   map[OpCode]uint
+	allowedMutableStateAccessAddrs map[common.Address]bool
 
 	mutableStateAccess bool
 	mutableCall        bool
 	forbiddenOp        bool
 
-	entryPointSelfBalanceCount int  // SELFBALANCE is called by the entrypoint twice before it starts validating paymasters
-	paymasterValidationMode    bool // only check for SELFDESTRUCT or DELEGATECALL when we are checking the paymasters
+	paymasterValidationMode bool // only check for SELFDESTRUCT or DELEGATECALL when we are checking the paymasters
 
-	depth   *int
 	statedb *StateDB
 }
 
-func NewUserOperationTracer() *UserOperationTracer {
+func NewUserOperationTracer(entryPointAddr, paymasterAddr, senderAddr common.Address) *UserOperationTracer {
 	return &UserOperationTracer{
 		accessList: newAccessList(),
 		forbiddenOps: map[OpCode]uint{
@@ -38,7 +37,11 @@ func NewUserOperationTracer() *UserOperationTracer {
 			BASEFEE: 0, BLOCKHASH: 0, NUMBER: 0, SELFBALANCE: 0,
 			BALANCE: 0, ORIGIN: 0, COINBASE: 0,
 		},
-		entryPointSelfBalanceCount: 0,
+		allowedMutableStateAccessAddrs: map[common.Address]bool{
+			entryPointAddr: true,
+			paymasterAddr:  true,
+			senderAddr:     true,
+		},
 	}
 }
 
@@ -73,7 +76,6 @@ func (uot *UserOperationTracer) Err() error {
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
 func (uot *UserOperationTracer) CaptureStart(env *EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
-	uot.depth = &env.depth
 	uot.statedb = &env.StateDB
 }
 
@@ -83,29 +85,29 @@ func (uot *UserOperationTracer) CaptureEnd(output []byte, gasUsed uint64, t time
 
 // CaptureState implements the Tracer interface to trace a single step of VM execution.
 func (uot *UserOperationTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
-	if depth == 1 && op == SELFBALANCE {
-		// TODO: this is done by number, now
-		// check entry point
-		uot.entryPointSelfBalanceCount++
-		if uot.entryPointSelfBalanceCount == 2 {
-			uot.paymasterValidationMode = true
-		}
+	if depth == 1 && op == NUMBER {
+		uot.paymasterValidationMode = true
 	}
 
 	if depth < 2 {
 		return
 	}
 
+	// Update access list and detect mutable state access
+	// TODO: check if this can be replaced by keeping an instance
+	// of `vm.AccessListTracer` and just call `CaptureState()` on
+	// that instance here
 	stack := scope.Stack
 	if (op == SLOAD || op == SSTORE) && stack.len() >= 1 {
+		address := scope.Contract.Address()
 		slot := common.Hash(stack.data[stack.len()-1].Bytes32())
-		uot.accessList.addSlot(scope.Contract.Address(), slot)
-		if depth > 2 {
+		uot.accessList.addSlot(address, slot)
+		if _, present := uot.allowedMutableStateAccessAddrs[address]; !present {
 			uot.mutableStateAccess = true
 		}
 	}
 
-	if _, ok := uot.forbiddenOps[op]; ok {
+	if _, present := uot.forbiddenOps[op]; present {
 		uot.forbiddenOps[op]++
 		uot.forbiddenOp = true
 	}
@@ -117,7 +119,8 @@ func (uot *UserOperationTracer) CaptureFault(env *EVM, pc uint64, op OpCode, gas
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
 func (uot *UserOperationTracer) CaptureEnter(op OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
-	// check for mutable code (selfdestruct or delegatecall) in contract being called ONLY IF we are validating the paymaster
+	// check for mutable code (selfdestruct or delegatecall) in contract
+	// being called ONLY IF we are validating the paymaster
 	if uot.paymasterValidationMode {
 		if containsSelfDestructOrDelegateCall(uot.statedb, to) {
 			uot.mutableCall = true
