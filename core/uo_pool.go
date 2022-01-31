@@ -224,15 +224,9 @@ func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *com
 		return nil, 0, err
 	}
 
-	res, gasLeft, vmErr := evm.Call(
-		vm.AccountRef(common.Address{}),
-		*entryPointAddr,
-		data,
-		userOp.VerificationGas, // TODO: +preVerificationGas
-		common.Big0,
-	)
-	gasUsed := userOp.VerificationGas - gasLeft // TODO: -preVerificationGas
-
+	userOpGas := userOp.PreVerificationGas + userOp.VerificationGas
+	res, gasLeft, vmErr := evm.Call(vm.AccountRef(common.Address{}), *entryPointAddr, data, userOpGas, common.Big0)
+	gasUsed := userOpGas - gasLeft
 	if vmErr != nil {
 		if errors.Is(vmErr, vm.ErrExecutionReverted) {
 			if revert, err := abi.UnpackRevert(res); err == nil {
