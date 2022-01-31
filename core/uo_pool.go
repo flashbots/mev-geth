@@ -95,7 +95,6 @@ type UserOpPool struct {
 	mevPool     mevPool
 	signer      signer
 
-	bySender     map[common.Address]*types.SimulatedUserOp
 	byEntryPoint map[common.Address][]*types.SimulatedUserOp
 }
 
@@ -140,7 +139,6 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 		mevPool:     mevPool,
 		signer:      &walletSigner{wallet, account, chainConfig.ChainID},
 
-		bySender:     make(map[common.Address]*types.SimulatedUserOp),
 		byEntryPoint: make(map[common.Address][]*types.SimulatedUserOp),
 	}
 
@@ -188,11 +186,6 @@ func (pool *UserOpPool) Stop() {
 
 // AddUserOp adds a user operation to the pool
 func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.Address) error {
-	if _, ok := pool.bySender[userOp.Sender]; ok {
-		log.Warn("Discarding user operation as there is already another one in the pool with same sender")
-		return ErrSenderUserOpInPool
-	}
-
 	// TODO: Sanity checks here, check nethermind
 
 	simmed, err := pool.simulateUserOp(userOp, entryPointAddr)
@@ -205,7 +198,6 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 	defer pool.mu.Unlock()
 
 	log.Warn("Adding user operation to the pool")
-	pool.bySender[simmed.Sender] = simmed
 	pool.byEntryPoint[*entryPointAddr] = append(pool.byEntryPoint[*entryPointAddr], simmed)
 	return nil
 }
@@ -316,7 +308,6 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 	for i, simmed := range userOpList {
 		if err := pool.reSimulateUserOp(simmed, entryPointAddr); err != nil {
 			log.Warn("Drop user operation because it didn't pass resimulation")
-			delete(pool.bySender, simmed.Sender)
 			pool.byEntryPoint[*entryPointAddr] = append(userOpList[:i], userOpList[i+1:]...)
 			continue
 		}
@@ -411,7 +402,6 @@ func (pool *UserOpPool) userOpsByGasLimit(gasLimit uint64, entryPointAddr *commo
 	for i, simmed := range userOpList {
 		if err := pool.reSimulateUserOp(simmed, entryPointAddr); err != nil {
 			log.Warn("Dropped user operation because it didn't pass resimulation")
-			delete(pool.bySender, simmed.Sender)
 			pool.byEntryPoint[*entryPointAddr] = append(userOpList[:i], userOpList[i+1:]...)
 			continue
 		}

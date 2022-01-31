@@ -78,7 +78,6 @@ func newTestUserOpPool() *UserOpPool {
 		mevPool:     &testMevPool{},
 		signer:      &testSigner{},
 
-		bySender:     make(map[common.Address]*types.SimulatedUserOp),
 		byEntryPoint: make(map[common.Address][]*types.SimulatedUserOp),
 	}
 }
