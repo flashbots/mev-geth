@@ -11,6 +11,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
+//go:generate bash ./generate.sh
+
 type EntryPoint struct {
 	Abi      abi.ABI
 	Bytecode hexutil.Bytes
@@ -27,8 +29,9 @@ func NewEntryPoint(artifact string) EntryPoint {
 	return entryPoint
 }
 
-func (entryPoint *EntryPoint) PackDeploy(create2Factory common.Address, perOpOverhead *big.Int, unstakeDelayBlocks *big.Int) ([]byte, error) {
-	return entryPoint.Abi.Pack("", create2Factory, perOpOverhead, unstakeDelayBlocks)
+func (entryPoint *EntryPoint) PackDeploy(create2Factory common.Address, perOpOverhead *big.Int, unstakeDelayBlocks uint32) ([]byte, error) {
+	packedArgs, err := entryPoint.Abi.Pack("", create2Factory, perOpOverhead, unstakeDelayBlocks)
+	return append(entryPoint.Bytecode, packedArgs...), err
 }
 
 func (entryPoint *EntryPoint) PackSimulateValidation(op *types.UserOp) ([]byte, error) {

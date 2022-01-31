@@ -227,7 +227,6 @@ func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *com
 
 	data, err := entrypoint.Contract.PackSimulateValidation(userOp)
 	if err != nil {
-		log.Error("error packing")
 		return nil, 0, err
 	}
 
