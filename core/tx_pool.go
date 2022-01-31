@@ -258,7 +258,7 @@ type TxPool struct {
 	beats              map[common.Address]time.Time // Last heartbeat from each known account
 	mevBundles         []types.MevBundle
 	megabundles        map[common.Address]types.MevBundle // One megabundle per each trusted relay
-	NewMegabundleHooks []func(*types.MevBundle)
+	NewMegabundleHooks []func(common.Address, *types.MevBundle)
 	all                *txLookup     // All transactions to allow lookups
 	priced             *txPricedList // All transactions sorted by price
 
@@ -641,8 +641,8 @@ func (pool *TxPool) AddMegabundle(relayAddr common.Address, txs types.Transactio
 
 	pool.megabundles[relayAddr] = megabundle
 
-	for hook := range pool.NewMegabundleHooks {
-		go pool.NewMegabundleHooks[hook](&megabundle)
+	for _, hook := range pool.NewMegabundleHooks {
+		go hook(relayAddr, &megabundle)
 	}
 
 	return nil

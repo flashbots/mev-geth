@@ -643,27 +643,3 @@ type MevBundle struct {
 	MaxTimestamp      uint64
 	RevertingTxHashes []common.Hash
 }
-
-func (b1 *MevBundle) Equals(b2 *MevBundle) bool {
-	if b1.BlockNumber == nil || b2.BlockNumber == nil || b1.BlockNumber.Cmp(b2.BlockNumber) != 0 || b1.MinTimestamp != b2.MinTimestamp || b1.MaxTimestamp != b2.MaxTimestamp {
-		return false
-	}
-
-	if len(b1.RevertingTxHashes) != len(b2.RevertingTxHashes) || len(b1.Txs) != len(b2.Txs) {
-		return false
-	}
-
-	for tx := range b1.RevertingTxHashes {
-		if b1.RevertingTxHashes[tx] != b2.RevertingTxHashes[tx] {
-			return false
-		}
-	}
-
-	for tx := range b1.Txs {
-		if b1.Txs[tx] != b2.Txs[tx] {
-			return false
-		}
-	}
-
-	return true
-}

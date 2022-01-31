@@ -105,15 +105,30 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 			}))
 	}
 
+	relayWorkerMap := make(map[common.Address]*worker)
+
 	for i := 0; i < len(config.TrustedRelays); i++ {
-		workers = append(workers,
-			newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, merger, &flashbotsData{
-				isFlashbots:        true,
-				isMegabundleWorker: true,
-				queue:              queue,
-				relayAddr:          config.TrustedRelays[i],
-			}))
+		relayWorker := newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, merger, &flashbotsData{
+			isFlashbots:        true,
+			isMegabundleWorker: true,
+			queue:              queue,
+			relayAddr:          config.TrustedRelays[i],
+		})
+		workers = append(workers, relayWorker)
+		relayWorkerMap[config.TrustedRelays[i]] = relayWorker
 	}
+
+	eth.TxPool().NewMegabundleHooks = append(eth.TxPool().NewMegabundleHooks, func(relayAddr common.Address, megabundle *types.MevBundle) {
+		worker, found := relayWorkerMap[relayAddr]
+		if !found {
+			return
+		}
+
+		select {
+		case worker.newMegabundleCh <- megabundle:
+		default:
+		}
+	})
 
 	log.Info("creating multi worker", "config.MaxMergedBundles", config.MaxMergedBundles, "config.TrustedRelays", config.TrustedRelays, "worker", len(workers))
 	return &multiWorker{

@@ -158,10 +158,7 @@ type worker struct {
 	exitCh             chan struct{}
 	resubmitIntervalCh chan time.Duration
 	resubmitAdjustCh   chan *intervalAdjust
-
-	newMegabundleCh               chan *types.MevBundle
-	megabundleCacheMu             sync.Mutex
-	previouslyProcessedMegabundle types.MevBundle
+	newMegabundleCh    chan *types.MevBundle
 
 	wg sync.WaitGroup
 
@@ -245,7 +242,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		txsCh:              make(chan core.NewTxsEvent, txChanSize),
 		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
 		chainSideCh:        make(chan core.ChainSideEvent, chainSideChanSize),
-		newWorkCh:          make(chan *newWorkReq),
+		newWorkCh:          make(chan *newWorkReq, 1),
 		taskCh:             taskCh,
 		resultCh:           make(chan *types.Block, resultQueueSize),
 		exitCh:             exitCh,
@@ -254,15 +251,6 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
 		flashbots:          flashbots,
-	}
-
-	if flashbots.isMegabundleWorker {
-		eth.TxPool().NewMegabundleHooks = append(eth.TxPool().NewMegabundleHooks, func(megabundle *types.MevBundle) {
-			select {
-			case worker.newMegabundleCh <- megabundle:
-			default:
-			}
-		})
 	}
 
 	// Subscribe NewTxsEvent for tx pool
@@ -357,14 +345,6 @@ func (w *worker) pendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return w.snapshotBlock, w.snapshotReceipts
 }
 
-func (w *worker) getAndCacheMegabundle(blockNumber *big.Int, blockTime uint64) (types.MevBundle, error) {
-	w.megabundleCacheMu.Lock()
-	defer w.megabundleCacheMu.Unlock()
-	megabundle, err := w.eth.TxPool().GetMegabundle(w.flashbots.relayAddr, blockNumber, blockTime)
-	w.previouslyProcessedMegabundle = megabundle
-	return megabundle, err
-}
-
 // start sets the running status as 1 and triggers new work submitting.
 func (w *worker) start() {
 	atomic.StoreInt32(&w.running, 1)
@@ -415,27 +395,38 @@ func recalcRecommit(minRecommit, prev time.Duration, target float64, inc bool) t
 func (w *worker) newWorkLoop(recommit time.Duration) {
 	defer w.wg.Done()
 	var (
-		interrupt           *int32
-		minRecommit         = recommit       // minimal resubmit interval specified by user.
-		timestamp           int64            // timestamp for each round of mining.
-		scheduledMegabundle *types.MevBundle = nil
+		runningInterrupt *int32     // Running task interrupt
+		queuedInterrupt  *int32     // Queued task interrupt
+		minRecommit      = recommit // minimal resubmit interval specified by user.
+		timestamp        int64      // timestamp for each round of mining.
 	)
 
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	<-timer.C // discard the initial tick
 
-	// commit aborts in-flight transaction execution with given signal and resubmits a new one.
+	// commit aborts in-flight transaction execution with highest seen signal and resubmits a new one
 	commit := func(noempty bool, s int32) {
-		if interrupt != nil {
-			atomic.StoreInt32(interrupt, s)
-		}
-		interrupt = new(int32)
 		select {
-		case w.newWorkCh <- &newWorkReq{interrupt: interrupt, noempty: noempty, timestamp: timestamp}:
 		case <-w.exitCh:
 			return
+		case queuedRequest := <-w.newWorkCh:
+			// Previously queued request wasn't started yet, update the request and resubmit
+			queuedRequest.noempty = queuedRequest.noempty || noempty
+			queuedRequest.timestamp = timestamp
+			w.newWorkCh <- queuedRequest // guaranteed to be nonblocking
+		default:
+			// Previously queued request has already started, cycle interrupt pointer and submit new work
+			runningInterrupt = queuedInterrupt
+			queuedInterrupt = new(int32)
+
+			w.newWorkCh <- &newWorkReq{interrupt: queuedInterrupt, noempty: noempty, timestamp: timestamp} // guaranteed to be nonblocking
 		}
+
+		if runningInterrupt != nil && s > atomic.LoadInt32(runningInterrupt) {
+			atomic.StoreInt32(runningInterrupt, s)
+		}
+
 		timer.Reset(recommit)
 		atomic.StoreInt32(&w.newTxs, 0)
 	}
@@ -462,21 +453,9 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 			timestamp = time.Now().Unix()
 			commit(false, commitInterruptNewHead)
 
-		case megabundle := <-w.newMegabundleCh:
+		case <-w.newMegabundleCh:
 			if w.isRunning() {
-				w.megabundleCacheMu.Lock()
-				// Do not interrupt if already processing the pushed megabundle, or if megabundle wasn't pulled yet (as the most recent will be). This can happen if two updates happen in quick succession.
-				previousMegabundleConsumed := scheduledMegabundle == nil || len(w.previouslyProcessedMegabundle.Txs) == 0 || scheduledMegabundle.Equals(&w.previouslyProcessedMegabundle)
-				currentMegabundleConsumed := megabundle.Equals(&w.previouslyProcessedMegabundle)
-
-				shouldInterrupt := previousMegabundleConsumed && !currentMegabundleConsumed
-
-				scheduledMegabundle = megabundle
-				w.megabundleCacheMu.Unlock()
-
-				if shouldInterrupt {
-					commit(true, commitInterruptNewMegabundle)
-				}
+				commit(true, commitInterruptNone)
 			}
 
 		case <-timer.C:
@@ -542,7 +521,10 @@ func (w *worker) mainLoop() {
 	for {
 		select {
 		case req := <-w.newWorkCh:
-			w.commitNewWork(req.interrupt, req.noempty, req.timestamp)
+			// Don't start if the work has already been interrupted
+			if req.interrupt == nil || atomic.LoadInt32(req.interrupt) == commitInterruptNone {
+				w.commitNewWork(req.interrupt, req.noempty, req.timestamp)
+			}
 
 		case ev := <-w.chainSideCh:
 			// Short circuit for duplicate side blocks
@@ -1267,7 +1249,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		w.current.profit.Add(w.current.profit, bundle.ethSentToCoinbase)
 	}
 	if w.flashbots.isMegabundleWorker {
-		megabundle, err := w.getAndCacheMegabundle(header.Number, header.Time)
+		megabundle, err := w.eth.TxPool().GetMegabundle(w.flashbots.relayAddr, header.Number, header.Time)
 		log.Info("Starting to process a Megabundle", "relay", w.flashbots.relayAddr, "megabundle", megabundle, "error", err)
 		if err != nil {
 			return // no valid megabundle for this relay, nothing to do
