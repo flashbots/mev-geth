@@ -78,6 +78,8 @@ func newTracedEVM(statedb StateDB, chainConfig *params.ChainConfig) (*UserOperat
 	return tracer, NewEVM(blockCtx, txCtx, statedb, chainConfig, config)
 }
 
+// TODO: This is failing when when `selfbalance > 2` because we changed the
+// paymaster validation mode marker from BALANCE opcode to NUMBER
 func TestUserOperationTracerBansSelfDestructAndDelegateCallOnlyWhenPaymasterModeIsActive(t *testing.T) {
 	args := []struct {
 		opCode        OpCode
