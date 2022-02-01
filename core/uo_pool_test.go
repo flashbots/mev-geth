@@ -250,7 +250,7 @@ func TestSimulateUserOp(t *testing.T) {
 		t.Fatalf("Error signing test UserOp: %s", err)
 	}
 
-	_, _, simErr := pool.SimulateUserOp(userOp, &contracts.entryPointAddr, pool.chain.CurrentBlock())
+	_, simErr := pool.SimulateUserOp(userOp, &contracts.entryPointAddr, pool.chain.CurrentBlock())
 	if simErr != nil {
 		t.Fatalf("Simulation of user operation failed: %s", simErr)
 	}

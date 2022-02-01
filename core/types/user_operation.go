@@ -27,7 +27,6 @@ type SimulatedUserOp struct {
 	*UserOp
 
 	AccessList AccessList
-	GasUsed    uint64
 }
 
 type UserOpAbi struct {

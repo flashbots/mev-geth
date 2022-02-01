@@ -202,10 +202,10 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 	return nil
 }
 
-func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *common.Address, block *types.Block) (types.AccessList, uint64, error) {
+func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *common.Address, block *types.Block) (types.AccessList, error) {
 	state, err := pool.chain.StateAt(block.Root())
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
 	blockCtx := NewEVMBlockContext(block.Header(), pool.chain, &common.Address{})
@@ -221,12 +221,11 @@ func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *com
 
 	data, err := entrypoint.Contract.PackSimulateValidation(userOp)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
 	userOpGas := userOp.PreVerificationGas + userOp.VerificationGas
-	res, gasLeft, vmErr := evm.Call(vm.AccountRef(common.Address{}), *entryPointAddr, data, userOpGas, common.Big0)
-	gasUsed := userOpGas - gasLeft
+	res, _, vmErr := evm.Call(vm.AccountRef(common.Address{}), *entryPointAddr, data, userOpGas, common.Big0)
 	if vmErr != nil {
 		if errors.Is(vmErr, vm.ErrExecutionReverted) {
 			if revert, err := abi.UnpackRevert(res); err == nil {
@@ -240,19 +239,19 @@ func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *com
 				}
 			}
 		}
-		return nil, gasUsed, vmErr
+		return nil, vmErr
 	}
 
 	if tracerErr := tracer.Err(); tracerErr != nil {
-		return nil, gasUsed, tracerErr
+		return nil, tracerErr
 	}
 
-	return tracer.AccessList(), gasUsed, nil
+	return tracer.AccessList(), nil
 }
 
 func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *common.Address) (*types.SimulatedUserOp, error) {
 	block := pool.chain.CurrentBlock()
-	accessList, gasUsed, simErr := pool.SimulateUserOp(userOp, entryPointAddr, block)
+	accessList, simErr := pool.SimulateUserOp(userOp, entryPointAddr, block)
 	if simErr != nil {
 		return nil, simErr
 	}
@@ -260,18 +259,17 @@ func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *com
 	return &types.SimulatedUserOp{
 		UserOp:     userOp,
 		AccessList: accessList,
-		GasUsed:    gasUsed,
 	}, nil
 }
 
 func (pool *UserOpPool) reSimulateUserOp(simmedUserOp *types.SimulatedUserOp, entryPointAddr *common.Address) error {
 	block := pool.chain.CurrentBlock()
-	accessList, gasUsed, simErr := pool.SimulateUserOp(simmedUserOp.UserOp, entryPointAddr, block)
+	accessList, simErr := pool.SimulateUserOp(simmedUserOp.UserOp, entryPointAddr, block)
 	if simErr != nil {
 		return simErr
 	}
 
-	if !accessList.Equals(simmedUserOp.AccessList) || gasUsed != simmedUserOp.GasUsed { // TODO: remove gasUsed
+	if !accessList.Equals(simmedUserOp.AccessList) {
 		return ErrUserOpReSimulationFailed
 	}
 
@@ -300,14 +298,14 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 
 	bundlesCreated := uint(0)
 	for i, simmed := range userOpList {
-		if err := pool.reSimulateUserOp(simmed, entryPointAddr); err != nil {
-			log.Warn("Drop user operation because it didn't pass resimulation")
-			pool.byEntryPoint[*entryPointAddr] = append(userOpList[:i], userOpList[i+1:]...)
+		if totalGasUsed+simmed.PreVerificationGas+simmed.VerificationGas+simmed.CallGas > gasLimit {
+			// Including this userOp in our transaction would make it exceed the block gasLimit
 			continue
 		}
 
-		if totalGasUsed+simmed.GasUsed > gasLimit {
-			// TODO: do this earlier, before resimulation
+		if err := pool.reSimulateUserOp(simmed, entryPointAddr); err != nil {
+			log.Warn("Drop user operation because it didn't pass resimulation")
+			pool.byEntryPoint[*entryPointAddr] = append(userOpList[:i], userOpList[i+1:]...)
 			continue
 		}
 
@@ -363,7 +361,7 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 
 	gas := uint64(0)
 	for _, uo := range userOps {
-		gas += uo.VerificationGas + uo.CallGas + overheadGas
+		gas += uo.PreVerificationGas + uo.VerificationGas + uo.CallGas + overheadGas
 	}
 
 	chainId := pool.chainConfig.ChainID
