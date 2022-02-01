@@ -124,9 +124,10 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 		}
 	}
 
-	// if config.maxBundles == 0 {
-	// 	config.maxBundles = 1
-	// }
+	// TODO: Figure out how to properly set default config values
+	if config.maxBundles == 0 {
+		config.maxBundles = 1
+	}
 
 	pool := &UserOpPool{
 		config: config,
