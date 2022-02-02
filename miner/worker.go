@@ -888,12 +888,11 @@ func (w *worker) commitBundle(txs types.Transactions, coinbase common.Address, i
 	var coalescedLogs []*types.Log
 
 	for _, tx := range txs {
-		// (1) new head block event arrival, the interrupt signal is commitInterruptNewHead
-		// (2) worker start or restart, the interrupt signal is commitInterruptNewHead
-		// (3) new megabundle received, the interrupt signal is commitInterruptNewMegabundle
-		// (4) worker recreate the mining block with any newly arrived transactions, the interrupt signal is commitInterruptResubmit.
-		// For the first three cases, the semi-finished work will be discarded.
-		// For the third case, the semi-finished work will be submitted to the consensus engine.
+		// In the following three cases, we will interrupt the execution of the transaction.
+		// (1) new head block event arrival, the interrupt signal is 1
+		// (2) worker start or restart, the interrupt signal is 1
+		// (3) worker recreate the mining block with any newly arrived transactions, the interrupt signal is 2.
+		// For the first two cases, the semi-finished work will be discarded.
 		if interrupt != nil && atomic.LoadInt32(interrupt) != commitInterruptNone {
 			// Notify resubmit loop to increase resubmitting interval due to too frequent commits.
 			if atomic.LoadInt32(interrupt) == commitInterruptResubmit {
@@ -908,7 +907,7 @@ func (w *worker) commitBundle(txs types.Transactions, coinbase common.Address, i
 				return false
 			}
 
-			// Discard the work as either new head or new megabundle (if mining megabundles) is present
+			// Discard the work as new head is present
 			return true
 		}
 		// If we don't have enough gas for any further transactions then we're done
@@ -1004,13 +1003,11 @@ func (w *worker) commitTransactions(txs *types.TransactionsByPriceAndNonce, coin
 	var coalescedLogs []*types.Log
 
 	for {
-		// In the following cases, we will interrupt the execution of the transaction.
-		// (1) new head block event arrival, the interrupt signal is commitInterruptNewHead
-		// (2) worker start or restart, the interrupt signal is commitInterruptNewHead
-		// (3) new megabundle received, the interrupt signal is commitInterruptNewMegabundle
-		// (4) worker recreate the mining block with any newly arrived transactions, the interrupt signal is commitInterruptResubmit.
-		// For the first three cases, the semi-finished work will be discarded.
-		// For the third case, the semi-finished work will be submitted to the consensus engine.
+		// In the following three cases, we will interrupt the execution of the transaction.
+		// (1) new head block event arrival, the interrupt signal is 1
+		// (2) worker start or restart, the interrupt signal is 1
+		// (3) worker recreate the mining block with any newly arrived transactions, the interrupt signal is 2.
+		// For the first two cases, the semi-finished work will be discarded.
 		if interrupt != nil && atomic.LoadInt32(interrupt) != commitInterruptNone {
 			// Notify resubmit loop to increase resubmitting interval due to too frequent commits.
 			if atomic.LoadInt32(interrupt) == commitInterruptResubmit {
@@ -1025,7 +1022,7 @@ func (w *worker) commitTransactions(txs *types.TransactionsByPriceAndNonce, coin
 				return false
 			}
 
-			// Discard the work as either new head or new megabundle (if mining megabundles) is present
+			// Discard the work as new head is present
 			return true
 		}
 		// If we don't have enough gas for any further transactions then we're done
