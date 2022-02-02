@@ -111,7 +111,6 @@ type task struct {
 const (
 	commitInterruptNone int32 = iota
 	commitInterruptNewHead
-	commitInterruptNewMegabundle
 	commitInterruptResubmit
 )
 
