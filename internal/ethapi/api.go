@@ -2100,23 +2100,21 @@ type SendUserOperationArgs struct {
 	PaymasterData *hexutil.Bytes  `json:"paymasterData"`
 }
 
-func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, args SendUserOperationArgs) error {
-	// TODO This should be an rpc param
-	entryPointAddr := common.BytesToAddress([]byte("0x6fdcfF0FeDa541135Bee30F1eAa6Cf6e8A54BE79"))
+func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, args SendUserOperationArgs, entryPointAddr *common.Address) error {
 	return s.b.SendUserOperation(ctx, &types.UserOp{
 		Nonce:              uint64(*args.Nonce),
 		Signature:          *args.Signature,
 		PreVerificationGas: uint64(*args.PreVerificationGas),
 		VerificationGas:    uint64(*args.VerificationGas),
 		CallGas:            uint64(*args.CallGas),
-		GasFeeCap:          *(*big.Int)(args.GasFeeCap),
-		GasTipCap:          *(*big.Int)(args.GasTipCap),
+		GasFeeCap:          (*big.Int)(args.GasFeeCap),
+		GasTipCap:          (*big.Int)(args.GasTipCap),
 		InitCode:           *args.InitCode,
 		Sender:             *args.Sender,
 		CallData:           *args.CallData,
 		Paymaster:          *args.Paymaster,
 		PaymasterData:      *args.PaymasterData,
-	}, &entryPointAddr)
+	}, entryPointAddr)
 }
 
 // }}}
