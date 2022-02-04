@@ -24,14 +24,19 @@ const (
 	overheadGas = uint64(0)
 )
 
+// TODO: Check error messages
 var (
 	// ErrSignerAccountNotFound is returned if the provided signer
 	// doesn't have an account registered under AccountManager
-	ErrSignerAccountNotFound = errors.New("The provided signer address doesn't have an account associated")
+	ErrSignerAccountNotFound = errors.New("The provided signer address doesn't have an account associated or we're not managing any account")
 
 	// ErrSenderUserOperationInPool is returned if the pool already contains a
-	// user operation with the given sender.
-	ErrSenderUserOpInPool = errors.New("Sender already has a user operation in the pool")
+	// user operation with the given sender and nonce, but the gas tip given wasn't enough to upgrade it.
+	ErrSenderNonceUserOpInPool = errors.New("Sender already has a user operation in the pool with this nonce and GasTip is not enough to upgrade")
+
+	// ErrSenderAllowanceExceeded is returned if the pool already contains
+	// the maximum allowed amount of user operations for the given sender.
+	ErrSenderAllowanceExceeded = errors.New("Sender already reached the maximum allowed amount of user operations in the pool")
 
 	// ErrUserOpSimulationFailed is returned if the simulation of the
 	// user operation fails, and prevents it from being added to the pool
@@ -75,8 +80,9 @@ func (signer walletSigner) SignTx(tx *types.Transaction) (*types.Transaction, er
 }
 
 type UserOpPoolConfig struct {
-	signerAddr common.Address
-	maxBundles uint
+	signerAddr          common.Address
+	maxBundles          uint
+	maxUserOpsPerSender uint
 }
 
 type UserOpPool struct {
@@ -95,10 +101,17 @@ type UserOpPool struct {
 	mevPool     mevPool
 	signer      signer
 
+	// sender -> (nonce -> index)
+	// `index`: is the index of the op in the corresponding `byEntryPoint` pool
+	bySender map[common.Address]map[uint64]int
+
+	// entrypoint -> [user operations]
 	byEntryPoint map[common.Address][]*types.SimulatedUserOp
 }
 
 func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, chain blockChainWithContext, mevPool mevPool, accountManager *accounts.Manager) (*UserOpPool, error) {
+	// TODO: Find a better place for this {{{
+
 	var (
 		wallet  accounts.Wallet
 		account accounts.Account
@@ -129,6 +142,13 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 		config.maxBundles = 1
 	}
 
+	// TODO: Figure out how to properly set default config values
+	if config.maxUserOpsPerSender == 0 {
+		config.maxUserOpsPerSender = 1
+	}
+
+	// }}}
+
 	pool := &UserOpPool{
 		config: config,
 
@@ -140,6 +160,7 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 		mevPool:     mevPool,
 		signer:      &walletSigner{wallet, account, chainConfig.ChainID},
 
+		bySender:     make(map[common.Address]map[uint64]int),
 		byEntryPoint: make(map[common.Address][]*types.SimulatedUserOp),
 	}
 
@@ -187,7 +208,35 @@ func (pool *UserOpPool) Stop() {
 
 // AddUserOp adds a user operation to the pool
 func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.Address) error {
-	// TODO: Sanity checks here, check nethermind
+	// TODO: Sanity checks here, check out nethermind
+
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
+	var (
+		toUpgrade int
+		isUpgrade bool
+	)
+	if byNonce, ok := pool.bySender[userOp.Sender]; ok {
+		if toUpgrade, isUpgrade = byNonce[userOp.Nonce]; isUpgrade {
+			// this must be an upgrade attempt
+			// get op that the user is trying to upgrade
+			poolUserOp := pool.byEntryPoint[*entryPointAddr][toUpgrade]
+			if userOp.GasTipCap.Cmp(poolUserOp.GasTipCap) <= 0 {
+				// not enough increment of gas fee for upgrade
+				return ErrSenderNonceUserOpInPool
+			}
+			requiredInc := new(big.Int).Div(poolUserOp.GasTipCap, new(big.Int).SetUint64(10))
+			if new(big.Int).Sub(userOp.GasTipCap, poolUserOp.GasTipCap).Cmp(requiredInc) <= 0 {
+				// not enough increment of gas fee for upgrade
+				return ErrSenderNonceUserOpInPool
+			}
+		}
+	}
+
+	if !isUpgrade && uint(len(pool.bySender[userOp.Sender])) >= pool.config.maxUserOpsPerSender {
+		return ErrSenderNonceUserOpInPool
+	}
 
 	simmed, err := pool.simulateUserOp(userOp, entryPointAddr)
 	if err != nil {
@@ -195,10 +244,14 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 		return err
 	}
 
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-
 	log.Warn("Adding user operation to the pool")
+	if isUpgrade {
+		// remove from the pool and bySender map the user operation that is being upgraded
+		delete(pool.bySender[userOp.Sender], userOp.Nonce)
+		pool.byEntryPoint[*entryPointAddr] = append(pool.byEntryPoint[*entryPointAddr][:toUpgrade], pool.byEntryPoint[*entryPointAddr][toUpgrade:]...)
+	}
+	// add the new user operation to the pool and bySender map
+	pool.bySender[userOp.Sender][userOp.Nonce] = len(pool.byEntryPoint[*entryPointAddr])
 	pool.byEntryPoint[*entryPointAddr] = append(pool.byEntryPoint[*entryPointAddr], simmed)
 	return nil
 }
@@ -257,10 +310,20 @@ func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *com
 		return nil, simErr
 	}
 
-	return &types.SimulatedUserOp{
+	simmed := &types.SimulatedUserOp{
 		UserOp:     userOp,
 		AccessList: accessList,
-	}, nil
+	}
+
+	for _, i := range pool.bySender[userOp.Sender] {
+		poolUserOp := pool.byEntryPoint[*entryPointAddr][i]
+		if accessList.Overlaps(poolUserOp.AccessList) {
+			// TODO: Maybe this error wrapping is overly complicated
+			return simmed, fmt.Errorf("%w (%s)", ErrUserOpSimulationFailed, "User operation access list overlaps with those already in the pool")
+		}
+	}
+
+	return simmed, nil
 }
 
 func (pool *UserOpPool) reSimulateUserOp(simmedUserOp *types.SimulatedUserOp, entryPointAddr *common.Address) error {
@@ -290,14 +353,15 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 	// TODO: maybe this shouldn't be sorted here
 	// use some more efficient data structure
 	sort.Slice(userOpList, func(i, j int) bool {
-		return userOpList[i].GasTipCap.Cmp(&userOpList[j].GasTipCap) < 0
+		return userOpList[i].GasTipCap.Cmp(userOpList[j].GasTipCap) < 0
 	})
 
-	userOps := []*types.UserOp{}
+	includedUserOps := []*types.UserOp{}
+	includedAccessLists := []types.AccessList{}
 	totalGasUsed := uint64(0)
-	totalAccessList := types.AccessList{}
 
 	bundlesCreated := uint(0)
+BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 	for i, simmed := range userOpList {
 		if totalGasUsed+simmed.PreVerificationGas+simmed.VerificationGas+simmed.CallGas > gasLimit {
 			// Including this userOp in our transaction would make it exceed the block gasLimit
@@ -310,20 +374,22 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 			continue
 		}
 
-		if totalAccessList.Overlaps(simmed.AccessList) {
-			continue
+		for _, al := range includedAccessLists {
+			if simmed.AccessList.Overlaps(al) {
+				continue BundleLoop
+			}
 		}
 
 		totalGasUsed += simmed.PreVerificationGas + simmed.VerificationGas + simmed.CallGas
-		// totalAccessList.Extend(simmed.AccessList) // TODO
-		userOps = append(userOps, simmed.UserOp)
+		includedAccessLists = append(includedAccessLists, simmed.AccessList)
+		includedUserOps = append(includedUserOps, simmed.UserOp)
 		pool.byEntryPoint[*entryPointAddr] = append(userOpList[:i], userOpList[i+1:]...) // TODO: this should be done after inclusion in a block
 
 		// TODO
 		// Not sure if this is the correct fee for the tx
 		// Maybe gasFee should be the sum of all bundled userOp gasFee
 		gasFee := misc.CalcBaseFee(pool.chainConfig, head.Header())
-		signedTx, err := pool.bundleIntoTx(userOps, entryPointAddr, gasFee)
+		signedTx, err := pool.bundleIntoTx(includedUserOps, entryPointAddr, gasFee)
 		if err != nil {
 			return err
 		}

@@ -13,8 +13,8 @@ type UserOp struct {
 	PreVerificationGas uint64
 	VerificationGas    uint64
 	CallGas            uint64
-	GasTipCap          big.Int
-	GasFeeCap          big.Int
+	GasTipCap          *big.Int
+	GasFeeCap          *big.Int
 
 	InitCode      []byte
 	Sender        common.Address
@@ -54,8 +54,8 @@ func (userOp *UserOp) ToAbi() *UserOpAbi {
 		PreVerificationGas:   new(big.Int).SetUint64(userOp.PreVerificationGas),
 		VerificationGas:      new(big.Int).SetUint64(userOp.VerificationGas),
 		CallGas:              new(big.Int).SetUint64(userOp.CallGas),
-		MaxPriorityFeePerGas: &userOp.GasTipCap,
-		MaxFeePerGas:         &userOp.GasFeeCap,
+		MaxPriorityFeePerGas: userOp.GasTipCap,
+		MaxFeePerGas:         userOp.GasFeeCap,
 
 		InitCode:      userOp.InitCode,
 		Sender:        &userOp.Sender,
@@ -90,14 +90,17 @@ type alCacheEntry struct {
 }
 type alCache map[common.Address]alCacheEntry
 
+// TODO: this is not being used, maybe remove it
 func (al *AccessList) containsAddr(addr common.Address, cache *alCache) bool {
 	panic("Not Implemented")
 }
 
+// TODO: this is not being used, maybe remove it
 func (al *AccessList) containsSlot(addr common.Address, cache *alCache) bool {
 	panic("Not Implemented")
 }
 
+// TODO: this is not being used, maybe remove it
 func (al1 *AccessList) Extend(al2 AccessList) {
 	alCache := make(alCache)
 	for idx, tuple := range *al1 {

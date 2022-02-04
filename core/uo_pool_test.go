@@ -217,8 +217,8 @@ func newUserOpThatIncCounter(contracts *testAAContracts) (*types.UserOp, error) 
 		PreVerificationGas: uint64(100000),
 		VerificationGas:    uint64(1000000),
 		CallGas:            uint64(1000000),
-		GasTipCap:          *common.Big0,
-		GasFeeCap:          *common.Big256,
+		GasTipCap:          common.Big0,
+		GasFeeCap:          common.Big256,
 
 		InitCode:      []byte{},
 		Sender:        contracts.simpleWalletAddr,
