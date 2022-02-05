@@ -198,7 +198,9 @@ func (pool *UserOpPool) mainLoop() {
 func (pool *UserOpPool) Stop() {
 	// Unsubscribe subscriptions registered from blockchain
 	pool.chainHeadSub.Unsubscribe()
-	pool.bundleTicker.Stop()
+	if pool.bundleTicker != nil {
+		pool.bundleTicker.Stop()
+	}
 
 	// Wait for workers to stop
 	pool.wg.Wait()
