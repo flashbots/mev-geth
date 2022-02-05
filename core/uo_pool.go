@@ -413,6 +413,8 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 // them into a transaction to later be wrapped in an MevBundle
 func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *common.Address, gasFee *big.Int) (*types.Transaction, error) {
 	// TODO: eth_estimateGas: gas
+	// Investigate this a little more, there is no easy
+	// way in geth to do this because method for this is on api
 	var (
 		err  error
 		data []byte
