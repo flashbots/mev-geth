@@ -1486,6 +1486,8 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 
 	totalEth := new(big.Int).Add(ethSentToCoinbase, gasFees)
 
+	fmt.Printf("-----> MevTotalFee is %v, from which %v were sent to coinbase(%s)\n", totalEth, ethSentToCoinbase, w.coinbase) // HACK
+
 	return simulatedBundle{
 		mevGasPrice:       new(big.Int).Div(totalEth, new(big.Int).SetUint64(totalGasUsed)),
 		totalEth:          totalEth,
