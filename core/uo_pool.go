@@ -252,6 +252,12 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 		delete(pool.bySender[userOp.Sender], userOp.Nonce)
 		pool.byEntryPoint[*entryPointAddr] = append(pool.byEntryPoint[*entryPointAddr][:toUpgrade], pool.byEntryPoint[*entryPointAddr][toUpgrade:]...)
 	}
+
+	// if bySender has never been used for this sender
+	if pool.bySender[userOp.Sender] == nil {
+		// initialize the `nonce -> op` map
+		pool.bySender[userOp.Sender] = make(map[uint64]int)
+	}
 	// add the new user operation to the pool and bySender map
 	pool.bySender[userOp.Sender][userOp.Nonce] = len(pool.byEntryPoint[*entryPointAddr])
 	pool.byEntryPoint[*entryPointAddr] = append(pool.byEntryPoint[*entryPointAddr], simmed)
