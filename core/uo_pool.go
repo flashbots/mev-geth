@@ -403,7 +403,7 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 		}
 
 		log.Warn("Add bundled transaction to mev bundle pool")
-		nextBlockNumber := new(big.Int).Add(head.Number(), common.Big1)
+		nextBlockNumber := new(big.Int).Add(head.Number(), common.Big256) // HACK: Only for debugging on private net
 		if err := pool.mevPool.AddMevBundle(types.Transactions{signedTx}, nextBlockNumber, 0, 0, nil); err != nil {
 			return err
 		}
