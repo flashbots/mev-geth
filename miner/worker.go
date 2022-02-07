@@ -1309,6 +1309,7 @@ func (w *worker) generateFlashbotsBundle(bundles []types.MevBundle, coinbase com
 		return simulatedBundles[j].mevGasPrice.Cmp(simulatedBundles[i].mevGasPrice) < 0
 	})
 
+	fmt.Printf("-------> %d bundles were simmed correctly, going to merge", len(simulatedBundles)) // HACK
 	return w.mergeBundles(simulatedBundles, parent, header, pendingTxs)
 }
 
@@ -1340,6 +1341,9 @@ func (w *worker) mergeBundles(bundles []simulatedBundle, parent *types.Block, he
 
 		simmed, err := w.computeBundleGas(bundle.originalBundle, parent, header, state, gasPool, pendingTxs, len(finalBundle))
 		if err != nil || simmed.mevGasPrice.Cmp(floorGasPrice) <= 0 {
+			if simmed.mevGasPrice.Cmp(floorGasPrice) <= 0 {
+				fmt.Println("------> Your bundle is bellow floorGasPrice:", floorGasPrice) // HACK
+			}
 			state = prevState
 			gasPool = prevGasPool
 			continue
