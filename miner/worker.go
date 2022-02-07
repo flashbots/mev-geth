@@ -19,6 +19,7 @@ package miner
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
 	"sort"
 	"sync"
@@ -1171,6 +1172,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	// empty block is necessary to keep the liveness of the network.
 	noBundles := true
 	if w.flashbots.isFlashbots && len(w.eth.TxPool().AllMevBundles()) > 0 {
+		fmt.Printf("There are %d bundles in MEV Pool", len(w.eth.TxPool().AllMevBundles())) // HACK: REMOVE
 		noBundles = false
 	}
 	if len(pending) == 0 && atomic.LoadUint32(&w.noempty) == 0 && noBundles && !w.flashbots.isMegabundleWorker {
