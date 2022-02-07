@@ -1172,9 +1172,8 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	// empty block is necessary to keep the liveness of the network.
 	noBundles := true
 	if w.flashbots.isFlashbots && len(w.eth.TxPool().AllMevBundles()) > 0 {
-		fmt.Printf("There are %d bundles in MEV Pool\n", len(w.eth.TxPool().AllMevBundles())) // HACK: REMOVE
-		validBundles, _ := w.eth.TxPool().MevBundles(header.Number, header.Time)              // HACK: REMOVE
-		fmt.Printf("There are %d bundles in MEV Pool valid\n", len(validBundles))             // HACK: REMOVE
+		validBundles, _ := w.eth.TxPool().MevBundles(header.Number, header.Time)                                                             // HACK: REMOVE
+		fmt.Printf("There are %d bundles in MEV Pool and %d of them is/are valid\n", len(w.eth.TxPool().AllMevBundles()), len(validBundles)) // HACK: REMOVE
 		noBundles = false
 	}
 	if len(pending) == 0 && atomic.LoadUint32(&w.noempty) == 0 && noBundles && !w.flashbots.isMegabundleWorker {
@@ -1381,11 +1380,13 @@ func (w *worker) simulateBundles(bundles []types.MevBundle, coinbase common.Addr
 		}
 		gasPool := new(core.GasPool).AddGas(header.GasLimit)
 		if len(bundle.Txs) == 0 {
+			fmt.Println("No transactions found in bundle") // HACK
 			continue
 		}
 		simmed, err := w.computeBundleGas(bundle, parent, header, state, gasPool, pendingTxs, 0)
 
 		if err != nil {
+			fmt.Println("Error computing gas for a bundle", "error", err) // HACK
 			log.Debug("Error computing gas for a bundle", "error", err)
 			continue
 		}
