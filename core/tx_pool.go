@@ -587,11 +587,11 @@ func (pool *TxPool) MevBundles(blockNumber *big.Int, blockTimestamp uint64) ([]t
 		}
 
 		// Roll over future bundles
-		if (bundle.MinTimestamp != 0 && blockTimestamp < bundle.MinTimestamp) || blockNumber.Cmp(bundle.BlockNumber) < 0 {
-			fmt.Println("--> Bundle out but keep") // HACK:REMOVE
-			bundles = append(bundles, bundle)
-			continue
-		}
+		// HACK: Shouldn't be commented out
+		// if (bundle.MinTimestamp != 0 && blockTimestamp < bundle.MinTimestamp) || blockNumber.Cmp(bundle.BlockNumber) < 0 {
+		// 	bundles = append(bundles, bundle)
+		// 	continue
+		// }
 
 		// return the ones which are in time
 		ret = append(ret, bundle)
