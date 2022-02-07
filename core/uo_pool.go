@@ -60,6 +60,10 @@ type mevPool interface {
 	) error
 }
 
+type noncer interface {
+	Nonce(addr common.Address) uint64
+}
+
 type signer interface {
 	Address() common.Address
 	SignTx(tx *types.Transaction) (*types.Transaction, error)
@@ -99,6 +103,7 @@ type UserOpPool struct {
 	chainConfig *params.ChainConfig
 	chain       blockChainWithContext
 	mevPool     mevPool
+	noncer      noncer
 	signer      signer
 
 	// sender -> (nonce -> index)
@@ -109,7 +114,7 @@ type UserOpPool struct {
 	byEntryPoint map[common.Address][]*types.SimulatedUserOp
 }
 
-func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, chain blockChainWithContext, mevPool mevPool, accountManager *accounts.Manager) (*UserOpPool, error) {
+func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, chain blockChainWithContext, mevPool mevPool, noncer noncer, accountManager *accounts.Manager) (*UserOpPool, error) {
 	// TODO: Find a better place for this {{{
 
 	var (
@@ -158,6 +163,7 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 		chainConfig: chainConfig,
 		chain:       chain,
 		mevPool:     mevPool,
+		noncer:      noncer,
 		signer:      &walletSigner{wallet, account, chainConfig.ChainID},
 
 		bySender:     make(map[common.Address]map[uint64]int),
@@ -442,9 +448,11 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 	}
 
 	chainId := pool.chainConfig.ChainID
+	nonce := pool.noncer.Nonce(pool.signer.Address())
 	tx := types.NewTx(&types.DynamicFeeTx{
-		To:        entryPointAddr,
 		ChainID:   chainId,
+		Nonce:     nonce,
+		To:        entryPointAddr,
 		Gas:       gas,
 		GasFeeCap: gasFee,
 		GasTipCap: common.Big0,
