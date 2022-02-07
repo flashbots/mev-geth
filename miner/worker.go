@@ -1172,7 +1172,9 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	// empty block is necessary to keep the liveness of the network.
 	noBundles := true
 	if w.flashbots.isFlashbots && len(w.eth.TxPool().AllMevBundles()) > 0 {
-		fmt.Printf("There are %d bundles in MEV Pool", len(w.eth.TxPool().AllMevBundles())) // HACK: REMOVE
+		fmt.Printf("There are %d bundles in MEV Pool\n", len(w.eth.TxPool().AllMevBundles())) // HACK: REMOVE
+		validBundles, _ := w.eth.TxPool().MevBundles(header.Number, header.Time)              // HACK: REMOVE
+		fmt.Printf("There are %d bundles in MEV Pool valid\n", len(validBundles))             // HACK: REMOVE
 		noBundles = false
 	}
 	if len(pending) == 0 && atomic.LoadUint32(&w.noempty) == 0 && noBundles && !w.flashbots.isMegabundleWorker {
