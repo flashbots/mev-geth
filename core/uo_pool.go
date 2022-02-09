@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/contracts/entrypoint"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -424,28 +425,19 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 			}
 		}
 
-		// TODO
-		// Not sure if this is the correct fee for the tx
-		// Maybe gasFee should be the sum of all bundled userOp gasFee
-		gasFee := misc.CalcBaseFee(pool.chainConfig, head.Header())
-
-		if simmed.GasFeeCap.Cmp(gasFee) < 0 {
-			log.Warn("Drop user operation because gas fee cap bellow current base fee")
-			pool.removeUserOp(pool.bySender[simmed.Sender][simmed.Nonce])
-			continue
-		}
+		baseFee := misc.CalcBaseFee(pool.chainConfig, head.Header())
 
 		totalGasUsed += simmed.PreVerificationGas + simmed.VerificationGas + simmed.CallGas
 		includedAccessLists = append(includedAccessLists, simmed.AccessList)
 		includedUserOps = append(includedUserOps, simmed.UserOp)
 		includedLocations = append(includedLocations, simmedLocation)
 
-		signedTx, err := pool.bundleIntoTx(includedUserOps, entryPointAddr, gasFee)
+		signedTx, err := pool.bundleIntoTx(includedUserOps, entryPointAddr, baseFee)
 		if err != nil {
 			return err
 		}
 
-		log.Warn("Add bundled transaction to mev bundle pool")
+		log.Warn("Add bundled transaction to mev bundle pool", "hash", signedTx.Hash())
 		nextBlockNumber := new(big.Int).Add(head.Number(), common.Big1)
 		if err := pool.mevPool.AddMevBundle(types.Transactions{signedTx}, nextBlockNumber, 0, 0, nil); err != nil {
 			return err
@@ -464,10 +456,7 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 
 // bundleUserOperations checks the user operation pool and bundles
 // them into a transaction to later be wrapped in an MevBundle
-func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *common.Address, gasFee *big.Int) (*types.Transaction, error) {
-	// TODO: eth_estimateGas: gas
-	// Investigate this a little more, there is no easy
-	// way in geth to do this because method for this is on api
+func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *common.Address, baseFee *big.Int) (*types.Transaction, error) {
 	var (
 		err  error
 		data []byte
@@ -481,10 +470,16 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 		return nil, err
 	}
 
+	// TODO: eth_estimateGas: gas
+	// Investigate this a little more, there is no easy
+	// way in geth to do this because method for this is on api
 	gas := uint64(0)
+	gasTip := big.NewInt(0)
 	for _, uo := range userOps {
 		gas += uo.PreVerificationGas + uo.VerificationGas + uo.CallGas + overheadGas
+		gasTip = math.BigMax(gasTip, uo.GasTipCap)
 	}
+	gasFee := new(big.Int).Add(baseFee, gasTip)
 
 	chainId := pool.chainConfig.ChainID
 	nonce := pool.noncer.Nonce(pool.signer.Address())
@@ -494,10 +489,11 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 		To:        entryPointAddr,
 		Gas:       gas,
 		GasFeeCap: gasFee,
-		GasTipCap: common.Big0,
+		GasTipCap: gasTip,
 		Value:     common.Big0,
 		Data:      data,
 	})
+	fmt.Printf("---> Tx with (gas %v) (gasFee %v) (gasTip %v)\n", tx.Gas(), tx.GasFeeCap(), tx.GasTipCap())
 
 	return pool.signer.SignTx(tx)
 }
