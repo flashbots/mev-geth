@@ -19,6 +19,7 @@ package miner
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
 	"sort"
 	"sync"
@@ -871,6 +872,9 @@ func (w *worker) commitBundle(txs types.Transactions, coinbase common.Address, i
 					inc:   true,
 				}
 			}
+			if atomic.LoadInt32(interrupt) == commitInterruptNewHead {
+				fmt.Println("-----> Interrupted bundle processing")
+			}
 			return atomic.LoadInt32(interrupt) == commitInterruptNewHead
 		}
 		// If we don't have enough gas for any further transactions then we're done
@@ -1199,6 +1203,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		}
 		log.Info("Flashbots bundle", "ethToCoinbase", ethIntToFloat(bundle.totalEth), "gasUsed", bundle.totalGasUsed, "bundleScore", bundle.mevGasPrice, "bundleLength", len(bundleTxs), "numBundles", numBundles, "worker", w.flashbots.maxMergedBundles)
 		if len(bundleTxs) == 0 {
+			fmt.Println("----> No bundle transactions")
 			return
 		}
 		if w.commitBundle(bundleTxs, w.coinbase, interrupt) {
