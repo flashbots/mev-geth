@@ -593,6 +593,7 @@ func (pool *TxPool) MevBundles(blockNumber *big.Int, blockTimestamp uint64) ([]t
 			continue
 		}
 
+		fmt.Println("----> Bundle considered for inclusion in this block")
 		// return the ones which are in time
 		ret = append(ret, bundle)
 		// keep the bundles around internally until they need to be pruned
