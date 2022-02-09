@@ -1344,11 +1344,12 @@ func (w *worker) mergeBundles(bundles []simulatedBundle, parent *types.Block, he
 
 		simmed, err := w.computeBundleGas(bundle.originalBundle, parent, header, state, gasPool, pendingTxs, len(finalBundle))
 		if err != nil || simmed.mevGasPrice.Cmp(floorGasPrice) <= 0 {
-			fmt.Printf("-----> Failed at merge bundles (err: %v) (mevGasPrice: %v)\n", err, simmed.mevGasPrice)
+			fmt.Printf("-----> Failed at merge bundles (err: %v) (mevGasPrice: %v) (floor: %v)\n", err, simmed.mevGasPrice, floorGasPrice)
 			state = prevState
 			gasPool = prevGasPool
 			continue
 		}
+		fmt.Printf("-----> Good merge bundles (mevGasPrice: %v) (floor: %v)\n", simmed.mevGasPrice, floorGasPrice)
 
 		log.Info("Included bundle", "ethToCoinbase", ethIntToFloat(simmed.totalEth), "gasUsed", simmed.totalGasUsed, "bundleScore", simmed.mevGasPrice, "bundleLength", len(simmed.originalBundle.Txs), "worker", w.flashbots.maxMergedBundles)
 
