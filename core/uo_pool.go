@@ -446,7 +446,7 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 		}
 
 		log.Warn("Add bundled transaction to byTxHash", "UserOps", len(includedUserOps))
-		pool.byTxHash[signedTx.Hash()] = append(pool.byTxHash[signedTx.Hash()], includedLocations...)
+		pool.byTxHash[signedTx.Hash()] = includedLocations
 
 		bundlesCreated += 1
 		if bundlesCreated >= maxBundles {
