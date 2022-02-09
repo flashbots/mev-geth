@@ -83,6 +83,11 @@ func (signer walletSigner) SignTx(tx *types.Transaction) (*types.Transaction, er
 	return signer.wallet.SignTx(signer.account, tx, signer.chainId)
 }
 
+type uoPoolLocation struct {
+	entryPointAddr common.Address
+	index          int
+}
+
 type UserOpPoolConfig struct {
 	signerAddr          common.Address
 	maxBundles          uint
@@ -106,9 +111,13 @@ type UserOpPool struct {
 	noncer      noncer
 	signer      signer
 
-	// sender -> (nonce -> index)
+	// tx hash -> [index]
 	// `index`: is the index of the op in the corresponding `byEntryPoint` pool
-	bySender map[common.Address]map[uint64]int
+	byTxHash map[common.Hash][]uoPoolLocation
+
+	// sender -> (nonce -> location)
+	// `index`: is the index of the op in the corresponding `byEntryPoint` pool
+	bySender map[common.Address]map[uint64]uoPoolLocation
 
 	// entrypoint -> [user operations]
 	byEntryPoint map[common.Address][]*types.SimulatedUserOp
@@ -166,7 +175,8 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 		noncer:      noncer,
 		signer:      &walletSigner{wallet, account, chainConfig.ChainID},
 
-		bySender:     make(map[common.Address]map[uint64]int),
+		byTxHash:     make(map[common.Hash][]uoPoolLocation),
+		bySender:     make(map[common.Address]map[uint64]uoPoolLocation),
 		byEntryPoint: make(map[common.Address][]*types.SimulatedUserOp),
 	}
 
@@ -191,6 +201,14 @@ func (pool *UserOpPool) mainLoop() {
 			if ev.Block != nil {
 				for entryPointAddr := range pool.byEntryPoint {
 					go pool.bundleByEntryPoint(ev.Block, &entryPointAddr)
+				}
+
+				for _, tx := range ev.Block.Transactions() {
+					if locations, ok := pool.byTxHash[tx.Hash()]; ok {
+						for _, loc := range locations {
+							pool.removeUserOp(loc)
+						}
+					}
 				}
 			}
 
@@ -222,14 +240,14 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 	defer pool.mu.Unlock()
 
 	var (
-		toUpgrade int
+		toUpgrade uoPoolLocation
 		isUpgrade bool
 	)
 	if byNonce, ok := pool.bySender[userOp.Sender]; ok {
 		if toUpgrade, isUpgrade = byNonce[userOp.Nonce]; isUpgrade {
 			// this must be an upgrade attempt
 			// get op that the user is trying to upgrade
-			poolUserOp := pool.byEntryPoint[*entryPointAddr][toUpgrade]
+			poolUserOp := pool.byEntryPoint[toUpgrade.entryPointAddr][toUpgrade.index]
 			if userOp.GasTipCap.Cmp(poolUserOp.GasTipCap) <= 0 {
 				// not enough increment of gas fee for upgrade
 				return ErrSenderNonceUserOpInPool
@@ -255,19 +273,28 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 	log.Warn("Adding user operation to the pool")
 	if isUpgrade {
 		// remove from the pool and bySender map the user operation that is being upgraded
-		delete(pool.bySender[userOp.Sender], userOp.Nonce)
-		pool.byEntryPoint[*entryPointAddr] = append(pool.byEntryPoint[*entryPointAddr][:toUpgrade], pool.byEntryPoint[*entryPointAddr][toUpgrade:]...)
+		pool.removeUserOp(toUpgrade)
 	}
 
 	// if bySender has never been used for this sender
 	if pool.bySender[userOp.Sender] == nil {
 		// initialize the `nonce -> op` map
-		pool.bySender[userOp.Sender] = make(map[uint64]int)
+		pool.bySender[userOp.Sender] = make(map[uint64]uoPoolLocation)
 	}
 	// add the new user operation to the pool and bySender map
-	pool.bySender[userOp.Sender][userOp.Nonce] = len(pool.byEntryPoint[*entryPointAddr])
+	pool.bySender[userOp.Sender][userOp.Nonce] = uoPoolLocation{
+		entryPointAddr: *entryPointAddr,
+		index:          len(pool.byEntryPoint[*entryPointAddr]),
+	}
 	pool.byEntryPoint[*entryPointAddr] = append(pool.byEntryPoint[*entryPointAddr], simmed)
 	return nil
+}
+
+func (pool *UserOpPool) removeUserOp(location uoPoolLocation) {
+	byEntryPoint := pool.byEntryPoint[location.entryPointAddr]
+	userOp := byEntryPoint[location.index]
+	pool.byEntryPoint[location.entryPointAddr] = append(byEntryPoint[:location.index], byEntryPoint[location.index+1:]...)
+	delete(pool.bySender[userOp.Sender], userOp.Nonce)
 }
 
 func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *common.Address, block *types.Block) (types.AccessList, error) {
@@ -329,8 +356,8 @@ func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *com
 		AccessList: accessList,
 	}
 
-	for _, i := range pool.bySender[userOp.Sender] {
-		poolUserOp := pool.byEntryPoint[*entryPointAddr][i]
+	for _, loc := range pool.bySender[userOp.Sender] {
+		poolUserOp := pool.byEntryPoint[loc.entryPointAddr][loc.index]
 		if accessList.Overlaps(poolUserOp.AccessList) {
 			// TODO: Maybe this error wrapping is overly complicated
 			return simmed, fmt.Errorf("%w (%s)", ErrUserOpSimulationFailed, "User operation access list overlaps with those already in the pool")
@@ -371,12 +398,15 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 	})
 
 	includedUserOps := []*types.UserOp{}
+	includedLocations := []uoPoolLocation{}
 	includedAccessLists := []types.AccessList{}
 	totalGasUsed := uint64(0)
 
 	bundlesCreated := uint(0)
 BundleLoop: // TODO: Remove this, I don't really like how this label looks here
-	for i, simmed := range userOpList {
+	for _, simmed := range userOpList {
+		simmedLocation := pool.bySender[simmed.Sender][simmed.Nonce] // it is used several times
+
 		if totalGasUsed+simmed.PreVerificationGas+simmed.VerificationGas+simmed.CallGas > gasLimit {
 			// Including this userOp in our transaction would make it exceed the block gasLimit
 			continue
@@ -384,7 +414,7 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 
 		if err := pool.reSimulateUserOp(simmed, entryPointAddr); err != nil {
 			log.Warn("Drop user operation because it didn't pass resimulation")
-			pool.byEntryPoint[*entryPointAddr] = append(userOpList[:i], userOpList[i+1:]...)
+			pool.removeUserOp(simmedLocation)
 			continue
 		}
 
@@ -394,15 +424,22 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 			}
 		}
 
-		totalGasUsed += simmed.PreVerificationGas + simmed.VerificationGas + simmed.CallGas
-		includedAccessLists = append(includedAccessLists, simmed.AccessList)
-		includedUserOps = append(includedUserOps, simmed.UserOp)
-		pool.byEntryPoint[*entryPointAddr] = append(userOpList[:i], userOpList[i+1:]...) // TODO: this should be done after inclusion in a block
-
 		// TODO
 		// Not sure if this is the correct fee for the tx
 		// Maybe gasFee should be the sum of all bundled userOp gasFee
 		gasFee := misc.CalcBaseFee(pool.chainConfig, head.Header())
+
+		if simmed.GasFeeCap.Cmp(gasFee) < 0 {
+			log.Warn("Drop user operation because gas fee cap bellow current base fee")
+			pool.removeUserOp(pool.bySender[simmed.Sender][simmed.Nonce])
+			continue
+		}
+
+		totalGasUsed += simmed.PreVerificationGas + simmed.VerificationGas + simmed.CallGas
+		includedAccessLists = append(includedAccessLists, simmed.AccessList)
+		includedUserOps = append(includedUserOps, simmed.UserOp)
+		includedLocations = append(includedLocations, simmedLocation)
+
 		signedTx, err := pool.bundleIntoTx(includedUserOps, entryPointAddr, gasFee)
 		if err != nil {
 			return err
@@ -413,6 +450,8 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 		if err := pool.mevPool.AddMevBundle(types.Transactions{signedTx}, nextBlockNumber, 0, 0, nil); err != nil {
 			return err
 		}
+
+		pool.byTxHash[signedTx.Hash()] = append(pool.byTxHash[signedTx.Hash()], includedLocations...)
 
 		bundlesCreated += 1
 		if bundlesCreated >= maxBundles {
