@@ -1206,7 +1206,9 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			fmt.Println("----> No bundle transactions")
 			return
 		}
+		fmt.Printf("-----> Try commit bundle with %v txs\n", len(bundleTxs))
 		if w.commitBundle(bundleTxs, w.coinbase, interrupt) {
+			fmt.Printf("-----> Couldn't commit bundle with %v txs\n", len(bundleTxs))
 			return
 		}
 		w.current.profit.Add(w.current.profit, bundle.ethSentToCoinbase)
