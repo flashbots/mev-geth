@@ -2117,6 +2117,10 @@ func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, ar
 	}, entryPointAddr)
 }
 
+func (s *PrivateAccountAbstractionAPI) SupportedEntryPoints(ctx context.Context) []common.Address {
+	return []common.Address{common.HexToAddress("0x90f3E1105E63C877bF9587DE5388C23Cdb702c6B")}
+}
+
 // }}}
 
 // ---------------------------------------------------------------- FlashBots ----------------------------------------------------------------
