@@ -208,6 +208,7 @@ func (pool *UserOpPool) mainLoop() {
 					if locations, ok := pool.byTxHash[tx.Hash()]; ok {
 						delete(pool.byTxHash, tx.Hash())
 						for _, loc := range locations {
+							log.Warn("Removing UserOp after inclusion in block", "EntryPoint", loc.entryPointAddr, "Index", loc.index)
 							pool.removeUserOp(loc)
 						}
 					}
@@ -444,6 +445,7 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 			return err
 		}
 
+		log.Warn("Add bundled transaction to byTxHash", "UserOps", len(includedUserOps))
 		pool.byTxHash[signedTx.Hash()] = append(pool.byTxHash[signedTx.Hash()], includedLocations...)
 
 		bundlesCreated += 1
