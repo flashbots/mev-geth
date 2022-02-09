@@ -18,7 +18,6 @@ package core
 
 import (
 	"errors"
-	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -582,16 +581,14 @@ func (pool *TxPool) MevBundles(blockNumber *big.Int, blockTimestamp uint64) ([]t
 	for _, bundle := range pool.mevBundles {
 		// Prune outdated bundles
 		if (bundle.MaxTimestamp != 0 && blockTimestamp > bundle.MaxTimestamp) || blockNumber.Cmp(bundle.BlockNumber) > 0 {
-			fmt.Println("--> Bundle out") // HACK:REMOVE
 			continue
 		}
 
 		// Roll over future bundles
-		// HACK: Shouldn't be commented out
-		// if (bundle.MinTimestamp != 0 && blockTimestamp < bundle.MinTimestamp) || blockNumber.Cmp(bundle.BlockNumber) < 0 {
-		// 	bundles = append(bundles, bundle)
-		// 	continue
-		// }
+		if (bundle.MinTimestamp != 0 && blockTimestamp < bundle.MinTimestamp) || blockNumber.Cmp(bundle.BlockNumber) < 0 {
+			bundles = append(bundles, bundle)
+			continue
+		}
 
 		// return the ones which are in time
 		ret = append(ret, bundle)

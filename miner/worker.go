@@ -1309,7 +1309,6 @@ func (w *worker) generateFlashbotsBundle(bundles []types.MevBundle, coinbase com
 		return simulatedBundles[j].mevGasPrice.Cmp(simulatedBundles[i].mevGasPrice) < 0
 	})
 
-	fmt.Printf("-------> %d bundles were simmed correctly, going to merge\n", len(simulatedBundles)) // HACK
 	return w.mergeBundles(simulatedBundles, parent, header, pendingTxs)
 }
 
@@ -1341,9 +1340,6 @@ func (w *worker) mergeBundles(bundles []simulatedBundle, parent *types.Block, he
 
 		simmed, err := w.computeBundleGas(bundle.originalBundle, parent, header, state, gasPool, pendingTxs, len(finalBundle))
 		if err != nil || simmed.mevGasPrice.Cmp(floorGasPrice) <= 0 {
-			if simmed.mevGasPrice.Cmp(floorGasPrice) <= 0 {
-				fmt.Printf("------> Your bundle is bellow floorGasPrice: %v < %v\n", simmed.mevGasPrice, floorGasPrice) // HACK
-			}
 			state = prevState
 			gasPool = prevGasPool
 			continue
@@ -1377,8 +1373,6 @@ func (w *worker) mergeBundles(bundles []simulatedBundle, parent *types.Block, he
 func (w *worker) simulateBundles(bundles []types.MevBundle, coinbase common.Address, parent *types.Block, header *types.Header, pendingTxs map[common.Address]types.Transactions) ([]simulatedBundle, error) {
 	simulatedBundles := []simulatedBundle{}
 
-	fmt.Println("-----> Simulating bundle") // HACK
-
 	for _, bundle := range bundles {
 		state, err := w.chain.StateAt(parent.Root())
 		if err != nil {
@@ -1386,20 +1380,17 @@ func (w *worker) simulateBundles(bundles []types.MevBundle, coinbase common.Addr
 		}
 		gasPool := new(core.GasPool).AddGas(header.GasLimit)
 		if len(bundle.Txs) == 0 {
-			fmt.Println("-----> No transactions found in bundle") // HACK
 			continue
 		}
 		simmed, err := w.computeBundleGas(bundle, parent, header, state, gasPool, pendingTxs, 0)
 
 		if err != nil {
-			fmt.Println("-----> Error computing gas for a bundle", "error", err) // HACK
 			log.Debug("Error computing gas for a bundle", "error", err)
 			continue
 		}
 		simulatedBundles = append(simulatedBundles, simmed)
 	}
 
-	fmt.Println("-----> Bundle simulation result:", len(simulatedBundles) > 0) // HACK
 	return simulatedBundles, nil
 }
 
@@ -1485,8 +1476,6 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 	}
 
 	totalEth := new(big.Int).Add(ethSentToCoinbase, gasFees)
-
-	fmt.Printf("-----> MevTotalFee is %v, from which %v were sent to coinbase(%s)\n", totalEth, ethSentToCoinbase, w.coinbase) // HACK
 
 	return simulatedBundle{
 		mevGasPrice:       new(big.Int).Div(totalEth, new(big.Int).SetUint64(totalGasUsed)),
