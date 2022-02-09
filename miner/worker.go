@@ -1466,6 +1466,7 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 
 		gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
 		gasPrice, err := tx.EffectiveGasTip(header.BaseFee)
+		fmt.Printf("-----> Gas price is %v with gas used: %v\n", gasPrice, gasUsed)
 		if err != nil {
 			return simulatedBundle{}, err
 		}
@@ -1473,15 +1474,18 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 		coinbaseBalanceAfter := state.GetBalance(w.coinbase)
 		coinbaseDelta := big.NewInt(0).Sub(coinbaseBalanceAfter, coinbaseBalanceBefore)
 		coinbaseDelta.Sub(coinbaseDelta, gasFeesTx)
+		fmt.Printf("------> CoinbaseDelta is %v\n", coinbaseDelta)
 		ethSentToCoinbase.Add(ethSentToCoinbase, coinbaseDelta)
 
 		if !txInPendingPool {
+			fmt.Printf("-----> Gas fees are %v and is being added\n", gasFeesTx)
 			// If tx is not in pending pool, count the gas fees
 			gasFees.Add(gasFees, gasFeesTx)
 		}
 	}
 
 	totalEth := new(big.Int).Add(ethSentToCoinbase, gasFees)
+	fmt.Printf("-----> Total eth was %v and totalGasUsed\n", totalEth)
 
 	return simulatedBundle{
 		mevGasPrice:       new(big.Int).Div(totalEth, new(big.Int).SetUint64(totalGasUsed)),
