@@ -206,6 +206,7 @@ func (pool *UserOpPool) mainLoop() {
 
 				for _, tx := range ev.Block.Transactions() {
 					if locations, ok := pool.byTxHash[tx.Hash()]; ok {
+						delete(pool.byTxHash, tx.Hash())
 						for _, loc := range locations {
 							pool.removeUserOp(loc)
 						}
