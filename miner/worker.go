@@ -1344,7 +1344,7 @@ func (w *worker) mergeBundles(bundles []simulatedBundle, parent *types.Block, he
 
 		simmed, err := w.computeBundleGas(bundle.originalBundle, parent, header, state, gasPool, pendingTxs, len(finalBundle))
 		if err != nil || simmed.mevGasPrice.Cmp(floorGasPrice) <= 0 {
-			fmt.Println("-----> Failed at merge bundles")
+			fmt.Printf("-----> Failed at merge bundles (err: %v) (mevGasPrice: %v)\n", err, simmed.mevGasPrice)
 			state = prevState
 			gasPool = prevGasPool
 			continue
