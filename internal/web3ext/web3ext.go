@@ -577,6 +577,16 @@ web3._extend({
 			inputFormatter: [null, web3._extend.formatters.inputBlockNumberFormatter, null]
 		}),
 		new web3._extend.Method({
+			name: 'sendUserOperation',
+			call: 'eth_sendUserOperation',
+			params: 2
+		}),
+		new web3._extend.Method({
+			name: 'supportedEntryPoints',
+			call: 'eth_supportedEntryPoints',
+			params: 0
+		}),
+		new web3._extend.Method({
 			name: 'sendBundle',
 			call: 'eth_sendBundle',
 			params: 1

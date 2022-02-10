@@ -2073,6 +2073,56 @@ func toHexSlice(b [][]byte) []string {
 	return r
 }
 
+// AccountAbstraction {{{
+
+type PrivateAccountAbstractionAPI struct {
+	b Backend
+}
+
+func NewPrivateAccountAbstractionAPI(b Backend) *PrivateAccountAbstractionAPI {
+	return &PrivateAccountAbstractionAPI{b}
+}
+
+type SendUserOperationArgs struct {
+	Nonce     *hexutil.Uint64 `json:"nonce"`
+	Signature *hexutil.Bytes  `json:"signature"`
+
+	PreVerificationGas *hexutil.Uint64 `json:"preVerificationGas"`
+	VerificationGas    *hexutil.Uint64 `json:"verificationGas"`
+	CallGas            *hexutil.Uint64 `json:"callGas"`
+	GasFeeCap          *hexutil.Big    `json:"maxFeePerGas"`
+	GasTipCap          *hexutil.Big    `json:"maxPriorityFeePerGas"`
+
+	InitCode      *hexutil.Bytes  `json:"initCode"`
+	Sender        *common.Address `json:"sender"`
+	CallData      *hexutil.Bytes  `json:"callData"`
+	Paymaster     *common.Address `json:"paymaster"`
+	PaymasterData *hexutil.Bytes  `json:"paymasterData"`
+}
+
+func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, args SendUserOperationArgs, entryPointAddr *common.Address) error {
+	return s.b.SendUserOperation(ctx, &types.UserOp{
+		Nonce:              uint64(*args.Nonce),
+		Signature:          *args.Signature,
+		PreVerificationGas: uint64(*args.PreVerificationGas),
+		VerificationGas:    uint64(*args.VerificationGas),
+		CallGas:            uint64(*args.CallGas),
+		GasFeeCap:          (*big.Int)(args.GasFeeCap),
+		GasTipCap:          (*big.Int)(args.GasTipCap),
+		InitCode:           *args.InitCode,
+		Sender:             *args.Sender,
+		CallData:           *args.CallData,
+		Paymaster:          *args.Paymaster,
+		PaymasterData:      *args.PaymasterData,
+	}, entryPointAddr)
+}
+
+func (s *PrivateAccountAbstractionAPI) SupportedEntryPoints(ctx context.Context) []common.Address {
+	return []common.Address{common.HexToAddress("0x90f3E1105E63C877bF9587DE5388C23Cdb702c6B")}
+}
+
+// }}}
+
 // ---------------------------------------------------------------- FlashBots ----------------------------------------------------------------
 
 // PrivateTxBundleAPI offers an API for accepting bundled transactions

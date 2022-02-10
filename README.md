@@ -1,14 +1,15 @@
-# MEV-geth
+# MEV-AA-geth
 
-This is a fork of go-ethereum, [the original README is here](README.original.md).
+This is a fork of MEV-geth, which is a fork of go-ethereum, [the original README is here](README.original.md).
 
-Flashbots is a research and development organization formed to mitigate the negative externalities and existential risks posed by miner-extractable value (MEV) to smart-contract blockchains. We propose a permissionless, transparent, and fair ecosystem for MEV extraction that reinforce the Ethereum ideals.
+This repository aims to implement [ERC-4337](https://eips.ethereum.org/EIPS/eip-4337) on top of MEV-geth.
+This repository specifically is maintained by Nethermind, however OpenGSN has [provided useful tooling](https://github.com/eth-infinitism/account-abstraction) alongside their EntryPoint.sol implementation, including an ethers.js fork that enables seamless signing with ERC-4337 compatible User Operation objects.
 
 ## Quick start
 
 ```
-git clone https://github.com/flashbots/mev-geth
-cd mev-geth
+git clone https://github.com/NethermindEth/mev-aa-geth
+cd mev-aa-geth
 make geth
 ```
 
@@ -16,15 +17,8 @@ See [here](https://geth.ethereum.org/docs/install-and-build/installing-geth#buil
 
 ## Documentation
 
-See [here](https://docs.flashbots.net) for Flashbots documentation.
-
-| Version | Spec                                                                                        |
-| ------- | ------------------------------------------------------------------------------------------- |
-| v0.4    | [MEV-Geth Spec v0.4](https://docs.flashbots.net/flashbots-auction/miners/mev-geth-spec/v04) |
-| v0.3    | [MEV-Geth Spec v0.3](https://docs.flashbots.net/flashbots-auction/miners/mev-geth-spec/v03) |
-| v0.2    | [MEV-Geth Spec v0.2](https://docs.flashbots.net/flashbots-auction/miners/mev-geth-spec/v02) |
-| v0.1    | [MEV-Geth Spec v0.1](https://docs.flashbots.net/flashbots-auction/miners/mev-geth-spec/v01) |
+Further documentation coming soon, until then [ERC-4337](https://eips.ethereum.org/EIPS/eip-4337) will be the best resource to learn more about the functionality of this repository.
 
 ### Feature requests and bug reports
 
-If you are a user of MEV-Geth and have suggestions on how to make integration with your current setup easier, or would like to submit a bug report, we encourage you to open an issue in this repository with the `enhancement` or `bug` labels respectively. If you need help getting started, please ask in the dedicated [#⛏️miners](https://discord.gg/rcgADN9qFX) channel in our Discord.
+If you would like to contribute or report bugs, we appreciate the opening of any issues or pull requests.
