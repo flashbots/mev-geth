@@ -82,20 +82,20 @@ func newTracedEVM(statedb StateDB, chainConfig *params.ChainConfig) (*UserOpTrac
 // paymaster validation mode marker from BALANCE opcode to NUMBER
 func TestUserOpTracerBansSelfDestructAndDelegateCallOnlyWhenPaymasterModeIsActive(t *testing.T) {
 	args := []struct {
-		opCode        OpCode
-		selfBalance   uint
-		shouldSucceed bool
+		opCode                  OpCode
+		paymasterValidationMode bool
+		shouldSucceed           bool
 	}{
-		{SELFDESTRUCT, 1, true},
-		{DELEGATECALL, 1, true},
-		{ADD, 1, true},
-		{SELFDESTRUCT, 2, false},
-		{DELEGATECALL, 2, false},
-		{ADD, 2, true},
+		{SELFDESTRUCT, false, true},
+		{DELEGATECALL, false, true},
+		{ADD, false, true},
+		{SELFDESTRUCT, true, false},
+		{DELEGATECALL, true, false},
+		{ADD, true, true},
 	}
 
 	for _, arg := range args {
-		t.Run(fmt.Sprintf("{OpCode=%v,SelfBalance=%v}", arg.opCode, arg.selfBalance), func(t *testing.T) {
+		t.Run(fmt.Sprintf("{OpCode=%v,PaymasterValidation=%v}", arg.opCode, arg.paymasterValidationMode), func(t *testing.T) {
 			statedb := newStateDB()
 			chainConfig := newChainConfig()
 			tracer, evm := newTracedEVM(statedb, chainConfig)
@@ -121,12 +121,12 @@ func TestUserOpTracerBansSelfDestructAndDelegateCallOnlyWhenPaymasterModeIsActiv
 				byte(arg.opCode),
 			}
 
-			selfBalanceOp := DUP1
-			if arg.selfBalance > 1 {
-				selfBalanceOp = SELFBALANCE
+			paymasterOp := DUP1
+			if arg.paymasterValidationMode {
+				paymasterOp = NUMBER
 			}
 
-			callerCode := []byte{byte(SELFBALANCE), byte(selfBalanceOp)}
+			callerCode := []byte{byte(SELFBALANCE), byte(paymasterOp)}
 			for i := 0; i < 5; i++ {
 				callerCode = append(callerCode, byte(PUSH32))
 				callerCode = append(callerCode, common.Hex2BytesFixed("0x00", 32)...)
