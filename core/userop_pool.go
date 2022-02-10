@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -101,10 +100,10 @@ type UserOpPool struct {
 
 	config UserOpPoolConfig
 
+	stopCh       chan struct{}
 	initDoneCh   chan struct{}
 	chainHeadCh  chan ChainHeadEvent
 	chainHeadSub event.Subscription
-	bundleTicker *time.Ticker
 
 	chainConfig *params.ChainConfig
 	chain       blockChainWithContext
@@ -167,6 +166,7 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 	pool := &UserOpPool{
 		config: config,
 
+		stopCh:      make(chan struct{}),
 		initDoneCh:  make(chan struct{}),
 		chainHeadCh: make(chan ChainHeadEvent),
 
@@ -214,9 +214,11 @@ func (pool *UserOpPool) mainLoop() {
 					go pool.bundleByEntryPoint(ev.Block, &entryPointAddr)
 				}
 			}
+		case <-pool.stopCh:
+			return
 
 		case <-pool.chainHeadSub.Err():
-			// close(pool.reorgShutdownCh)
+			close(pool.stopCh)
 			return
 		}
 	}
@@ -225,9 +227,9 @@ func (pool *UserOpPool) mainLoop() {
 func (pool *UserOpPool) Stop() {
 	// Unsubscribe subscriptions registered from blockchain
 	pool.chainHeadSub.Unsubscribe()
-	if pool.bundleTicker != nil {
-		pool.bundleTicker.Stop()
-	}
+
+	// tell mainLoop that we need to shutdown
+	close(pool.stopCh)
 
 	// Wait for workers to stop
 	pool.wg.Wait()
