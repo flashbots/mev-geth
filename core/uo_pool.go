@@ -200,10 +200,6 @@ func (pool *UserOpPool) mainLoop() {
 		select {
 		case ev := <-pool.chainHeadCh:
 			if ev.Block != nil {
-				for entryPointAddr := range pool.byEntryPoint {
-					go pool.bundleByEntryPoint(ev.Block, &entryPointAddr)
-				}
-
 				for _, tx := range ev.Block.Transactions() {
 					if locations, ok := pool.byTxHash[tx.Hash()]; ok {
 						delete(pool.byTxHash, tx.Hash())
@@ -212,6 +208,10 @@ func (pool *UserOpPool) mainLoop() {
 							pool.removeUserOp(loc)
 						}
 					}
+				}
+
+				for entryPointAddr := range pool.byEntryPoint {
+					go pool.bundleByEntryPoint(ev.Block, &entryPointAddr)
 				}
 			}
 
