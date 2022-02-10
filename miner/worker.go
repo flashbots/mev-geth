@@ -19,7 +19,6 @@ package miner
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"math/big"
 	"sort"
 	"sync"
@@ -872,9 +871,6 @@ func (w *worker) commitBundle(txs types.Transactions, coinbase common.Address, i
 					inc:   true,
 				}
 			}
-			if atomic.LoadInt32(interrupt) == commitInterruptNewHead {
-				fmt.Println("-----> Interrupted bundle processing")
-			}
 			return atomic.LoadInt32(interrupt) == commitInterruptNewHead
 		}
 		// If we don't have enough gas for any further transactions then we're done
@@ -1203,12 +1199,9 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		}
 		log.Info("Flashbots bundle", "ethToCoinbase", ethIntToFloat(bundle.totalEth), "gasUsed", bundle.totalGasUsed, "bundleScore", bundle.mevGasPrice, "bundleLength", len(bundleTxs), "numBundles", numBundles, "worker", w.flashbots.maxMergedBundles)
 		if len(bundleTxs) == 0 {
-			fmt.Println("----> No bundle transactions")
 			return
 		}
-		fmt.Printf("-----> Try commit bundle with %v txs\n", len(bundleTxs))
 		if w.commitBundle(bundleTxs, w.coinbase, interrupt) {
-			fmt.Printf("-----> Couldn't commit bundle with %v txs\n", len(bundleTxs))
 			return
 		}
 		w.current.profit.Add(w.current.profit, bundle.ethSentToCoinbase)
@@ -1344,12 +1337,10 @@ func (w *worker) mergeBundles(bundles []simulatedBundle, parent *types.Block, he
 
 		simmed, err := w.computeBundleGas(bundle.originalBundle, parent, header, state, gasPool, pendingTxs, len(finalBundle))
 		if err != nil || simmed.mevGasPrice.Cmp(floorGasPrice) <= 0 {
-			fmt.Printf("-----> Failed at merge bundles (err: %v) (mevGasPrice: %v) (floor: %v)\n", err, simmed.mevGasPrice, floorGasPrice)
 			state = prevState
 			gasPool = prevGasPool
 			continue
 		}
-		fmt.Printf("-----> Good merge bundles (mevGasPrice: %v) (floor: %v)\n", simmed.mevGasPrice, floorGasPrice)
 
 		log.Info("Included bundle", "ethToCoinbase", ethIntToFloat(simmed.totalEth), "gasUsed", simmed.totalGasUsed, "bundleScore", simmed.mevGasPrice, "bundleLength", len(simmed.originalBundle.Txs), "worker", w.flashbots.maxMergedBundles)
 
@@ -1466,7 +1457,6 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 
 		gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
 		gasPrice, err := tx.EffectiveGasTip(header.BaseFee)
-		fmt.Printf("-----> Gas price is %v with gas used: %v\n", gasPrice, gasUsed)
 		if err != nil {
 			return simulatedBundle{}, err
 		}
@@ -1474,18 +1464,15 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 		coinbaseBalanceAfter := state.GetBalance(w.coinbase)
 		coinbaseDelta := big.NewInt(0).Sub(coinbaseBalanceAfter, coinbaseBalanceBefore)
 		coinbaseDelta.Sub(coinbaseDelta, gasFeesTx)
-		fmt.Printf("------> CoinbaseDelta is %v\n", coinbaseDelta)
 		ethSentToCoinbase.Add(ethSentToCoinbase, coinbaseDelta)
 
 		if !txInPendingPool {
-			fmt.Printf("-----> Gas fees are %v and is being added\n", gasFeesTx)
 			// If tx is not in pending pool, count the gas fees
 			gasFees.Add(gasFees, gasFeesTx)
 		}
 	}
 
 	totalEth := new(big.Int).Add(ethSentToCoinbase, gasFees)
-	fmt.Printf("-----> Total eth was %v and totalGasUsed\n", totalEth)
 
 	return simulatedBundle{
 		mevGasPrice:       new(big.Int).Div(totalEth, new(big.Int).SetUint64(totalGasUsed)),

@@ -319,12 +319,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	} else {
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
-
-		ethBefore := st.state.GetBalance(common.Address(sender))
 		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value)
-		ethAfter := st.state.GetBalance(common.Address(sender))
-		fmt.Printf("-----> Eth from entryPoint is %v\n", new(big.Int).Sub(ethAfter, ethBefore))
-		fmt.Printf("-----> Gas price is %v\n", st.gasPrice)
 	}
 
 	if !london {
