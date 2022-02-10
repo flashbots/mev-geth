@@ -35,7 +35,7 @@ func NewUserOpTracer(entryPointAddr, paymasterAddr, senderAddr common.Address) *
 		forbiddenOps: map[OpCode]uint{
 			GASPRICE: 0, GASLIMIT: 0, DIFFICULTY: 0, TIMESTAMP: 0,
 			BASEFEE: 0, BLOCKHASH: 0, NUMBER: 0, SELFBALANCE: 0,
-			BALANCE: 0, ORIGIN: 0, COINBASE: 0,
+			BALANCE: 0, ORIGIN: 0, COINBASE: 0, GAS: 0,
 		},
 		allowedMutableStateAccessAddrs: map[common.Address]bool{
 			entryPointAddr: true,
