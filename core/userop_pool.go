@@ -311,7 +311,7 @@ func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *com
 		Origin:   common.Address{},
 		GasPrice: block.BaseFee(),
 	}
-	tracer := vm.NewUserOperationTracer(*entryPointAddr, userOp.Paymaster, userOp.Sender)
+	tracer := vm.NewUserOpTracer(*entryPointAddr, userOp.Paymaster, userOp.Sender)
 	evm := vm.NewEVM(blockCtx, txCtx, state, pool.chainConfig, vm.Config{
 		Tracer: tracer,
 		Debug:  true,

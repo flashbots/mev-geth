@@ -66,10 +66,10 @@ func newChainConfig() *params.ChainConfig {
 	}
 }
 
-func newTracedEVM(statedb StateDB, chainConfig *params.ChainConfig) (*UserOperationTracer, *EVM) {
+func newTracedEVM(statedb StateDB, chainConfig *params.ChainConfig) (*UserOpTracer, *EVM) {
 	blockCtx := newBlockCtx()
 	txCtx := newTxCtx()
-	tracer := NewUserOperationTracer(common.Address{}, common.Address{}, common.Address{})
+	tracer := NewUserOpTracer(common.Address{}, common.Address{}, common.Address{})
 	config := Config{
 		Tracer:    tracer,
 		Debug:     true,
@@ -80,7 +80,7 @@ func newTracedEVM(statedb StateDB, chainConfig *params.ChainConfig) (*UserOperat
 
 // TODO: This is failing when when `selfbalance > 2` because we changed the
 // paymaster validation mode marker from BALANCE opcode to NUMBER
-func TestUserOperationTracerBansSelfDestructAndDelegateCallOnlyWhenPaymasterModeIsActive(t *testing.T) {
+func TestUserOpTracerBansSelfDestructAndDelegateCallOnlyWhenPaymasterModeIsActive(t *testing.T) {
 	args := []struct {
 		opCode        OpCode
 		selfBalance   uint
@@ -158,7 +158,7 @@ func TestUserOperationTracerBansSelfDestructAndDelegateCallOnlyWhenPaymasterMode
 	}
 }
 
-func TestUserOperationTracerFailsIfBannedOpCodeIsUsedWhenCallDepthIsMoreThanOne(t *testing.T) {
+func TestUserOpTracerFailsIfBannedOpCodeIsUsedWhenCallDepthIsMoreThanOne(t *testing.T) {
 	args := []struct {
 		opCode        OpCode
 		shouldSucceed bool
@@ -230,7 +230,7 @@ func TestUserOperationTracerFailsIfBannedOpCodeIsUsedWhenCallDepthIsMoreThanOne(
 	}
 }
 
-func TestUserOperationTracerSucceedsIfBannedOpCodeIsUsedWhenCallDepthIsOne(t *testing.T) {
+func TestUserOpTracerSucceedsIfBannedOpCodeIsUsedWhenCallDepthIsOne(t *testing.T) {
 	args := []struct {
 		opCode        OpCode
 		shouldSucceed bool

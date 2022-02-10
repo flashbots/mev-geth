@@ -15,7 +15,7 @@ var (
 	ErrForbiddenOp        = errors.New("Forbidden OpCode used in user operation validation")
 )
 
-type UserOperationTracer struct {
+type UserOpTracer struct {
 	accessList                     accessList
 	forbiddenOps                   map[OpCode]uint
 	allowedMutableStateAccessAddrs map[common.Address]bool
@@ -29,8 +29,8 @@ type UserOperationTracer struct {
 	statedb *StateDB
 }
 
-func NewUserOperationTracer(entryPointAddr, paymasterAddr, senderAddr common.Address) *UserOperationTracer {
-	return &UserOperationTracer{
+func NewUserOpTracer(entryPointAddr, paymasterAddr, senderAddr common.Address) *UserOpTracer {
+	return &UserOpTracer{
 		accessList: newAccessList(),
 		forbiddenOps: map[OpCode]uint{
 			GASPRICE: 0, GASLIMIT: 0, DIFFICULTY: 0, TIMESTAMP: 0,
@@ -45,23 +45,23 @@ func NewUserOperationTracer(entryPointAddr, paymasterAddr, senderAddr common.Add
 	}
 }
 
-func (uot *UserOperationTracer) AccessList() types.AccessList {
+func (uot *UserOpTracer) AccessList() types.AccessList {
 	return uot.accessList.accessList()
 }
 
-func (uot *UserOperationTracer) ForbiddenOp() bool {
+func (uot *UserOpTracer) ForbiddenOp() bool {
 	return uot.forbiddenOp
 }
 
-func (uot *UserOperationTracer) MutableCall() bool {
+func (uot *UserOpTracer) MutableCall() bool {
 	return uot.mutableCall
 }
 
-func (uot *UserOperationTracer) MutableStateAccess() bool {
+func (uot *UserOpTracer) MutableStateAccess() bool {
 	return uot.mutableStateAccess
 }
 
-func (uot *UserOperationTracer) Err() error {
+func (uot *UserOpTracer) Err() error {
 	switch {
 	case uot.ForbiddenOp():
 		return ErrForbiddenOp
@@ -75,16 +75,16 @@ func (uot *UserOperationTracer) Err() error {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (uot *UserOperationTracer) CaptureStart(env *EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
+func (uot *UserOpTracer) CaptureStart(env *EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
 	uot.statedb = &env.StateDB
 }
 
 // CaptureEnd is called after the call finishes finalizing the tracing.
-func (uot *UserOperationTracer) CaptureEnd(output []byte, gasUsed uint64, t time.Duration, err error) {
+func (uot *UserOpTracer) CaptureEnd(output []byte, gasUsed uint64, t time.Duration, err error) {
 }
 
 // CaptureState implements the Tracer interface to trace a single step of VM execution.
-func (uot *UserOperationTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
+func (uot *UserOpTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
 	if depth == 1 && op == NUMBER {
 		uot.paymasterValidationMode = true
 	}
@@ -114,11 +114,11 @@ func (uot *UserOperationTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas
 }
 
 // CaptureFault implements the Tracer interface to trace an execution fault
-func (uot *UserOperationTracer) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
+func (uot *UserOpTracer) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
 }
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (uot *UserOperationTracer) CaptureEnter(op OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
+func (uot *UserOpTracer) CaptureEnter(op OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
 	// check for mutable code (selfdestruct or delegatecall) in contract
 	// being called ONLY IF we are validating the paymaster
 	if uot.paymasterValidationMode {
@@ -129,7 +129,7 @@ func (uot *UserOperationTracer) CaptureEnter(op OpCode, from common.Address, to 
 }
 
 // CaptureExit is called when EVM exits a scope, even if the scope didn't execute any code.
-func (uot *UserOperationTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
+func (uot *UserOpTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 }
 
 func containsSelfDestructOrDelegateCall(db *StateDB, address common.Address) bool {
