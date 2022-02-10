@@ -389,7 +389,7 @@ func (pool *UserOpPool) simulateOnBundle(simmedUserOp *types.SimulatedUserOp, en
 // bundleUserOperations checks the user operation pool and bundles
 // them into a transaction to later be wrapped in an MevBundle
 func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *common.Address) error {
-	gasLimit := head.GasLimit() // TODO: check this
+	gasLimit := head.GasLimit()
 	maxBundles := pool.config.maxBundles
 
 	pool.mu.Lock()
