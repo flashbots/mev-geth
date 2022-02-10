@@ -269,7 +269,7 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 		return ErrSenderNonceUserOpInPool
 	}
 
-	simmed, err := pool.simulateUserOp(userOp, entryPointAddr)
+	simmed, err := pool.simulateOnAdd(userOp, entryPointAddr)
 	if err != nil {
 		log.Warn("Discarding user operation because it didn't pass simulation")
 		return err
@@ -302,7 +302,7 @@ func (pool *UserOpPool) removeUserOp(location uoPoolLocation) {
 	delete(pool.bySender[userOp.Sender], userOp.Nonce)
 }
 
-func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *common.Address, block *types.Block) (types.AccessList, error) {
+func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *common.Address, block *types.Block) (types.AccessList, error) {
 	state, err := pool.chain.StateAt(block.Root())
 	if err != nil {
 		return nil, err
@@ -349,9 +349,9 @@ func (pool *UserOpPool) SimulateUserOp(userOp *types.UserOp, entryPointAddr *com
 	return tracer.AccessList(), nil
 }
 
-func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *common.Address) (*types.SimulatedUserOp, error) {
+func (pool *UserOpPool) simulateOnAdd(userOp *types.UserOp, entryPointAddr *common.Address) (*types.SimulatedUserOp, error) {
 	block := pool.chain.CurrentBlock()
-	accessList, simErr := pool.SimulateUserOp(userOp, entryPointAddr, block)
+	accessList, simErr := pool.simulateUserOp(userOp, entryPointAddr, block)
 	if simErr != nil {
 		return nil, simErr
 	}
@@ -372,9 +372,9 @@ func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *com
 	return simmed, nil
 }
 
-func (pool *UserOpPool) reSimulateUserOp(simmedUserOp *types.SimulatedUserOp, entryPointAddr *common.Address) error {
+func (pool *UserOpPool) simulateOnBundle(simmedUserOp *types.SimulatedUserOp, entryPointAddr *common.Address) error {
 	block := pool.chain.CurrentBlock()
-	accessList, simErr := pool.SimulateUserOp(simmedUserOp.UserOp, entryPointAddr, block)
+	accessList, simErr := pool.simulateUserOp(simmedUserOp.UserOp, entryPointAddr, block)
 	if simErr != nil {
 		return simErr
 	}
@@ -417,7 +417,7 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 			continue
 		}
 
-		if err := pool.reSimulateUserOp(simmed, entryPointAddr); err != nil {
+		if err := pool.simulateOnBundle(simmed, entryPointAddr); err != nil {
 			log.Warn("Drop user operation because it didn't pass resimulation")
 			pool.removeUserOp(simmedLocation)
 			continue
