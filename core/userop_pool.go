@@ -204,7 +204,8 @@ func (pool *UserOpPool) mainLoop() {
 					if locations, ok := pool.byTxHash[tx.Hash()]; ok {
 						delete(pool.byTxHash, tx.Hash())
 						for _, loc := range locations {
-							log.Warn("Removing UserOp after inclusion in block", "EntryPoint", loc.entryPointAddr, "Index", loc.index)
+							userOp := pool.byEntryPoint[loc.entryPointAddr][loc.index]
+							log.Info("Removing UserOp from pool after inclusion in block", "Sender", userOp.Sender, "Nonce", userOp.Nonce)
 							pool.removeUserOp(loc)
 						}
 					}
@@ -271,11 +272,11 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 
 	simmed, err := pool.simulateOnAdd(userOp, entryPointAddr)
 	if err != nil {
-		log.Warn("Discarding user operation because it didn't pass simulation")
+		log.Info("Discarding user operation because it didn't pass simulation")
 		return err
 	}
 
-	log.Warn("Adding user operation to the pool")
+	log.Info("Adding user operation to the pool")
 	if isUpgrade {
 		// remove from the pool and bySender map the user operation that is being upgraded
 		pool.removeUserOp(toUpgrade)
@@ -418,7 +419,7 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 		}
 
 		if err := pool.simulateOnBundle(simmed, entryPointAddr); err != nil {
-			log.Warn("Drop user operation because it didn't pass resimulation")
+			log.Info("Drop user operation because it didn't pass resimulation")
 			pool.removeUserOp(simmedLocation)
 			continue
 		}
@@ -441,14 +442,12 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 			return err
 		}
 
-		log.Warn("Add bundled transaction to mev bundle pool", "hash", signedTx.Hash())
 		nextBlockNumber := new(big.Int).Add(head.Number(), common.Big1)
 		if err := pool.mevPool.AddMevBundle(types.Transactions{signedTx}, nextBlockNumber, 0, 0, nil); err != nil {
 			return err
 		}
-
-		log.Warn("Add bundled transaction to byTxHash", "UserOps", len(includedUserOps))
 		pool.byTxHash[signedTx.Hash()] = includedLocations
+		log.Info("Add bundled transaction to mev bundle pool", "UserOps", len(includedUserOps), "hash", signedTx.Hash())
 
 		bundlesCreated += 1
 		if bundlesCreated >= maxBundles {
@@ -498,7 +497,6 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 		Value:     common.Big0,
 		Data:      data,
 	})
-	fmt.Printf("---> Tx with (gas %v) (gasFee %v) (gasTip %v)\n", tx.Gas(), tx.GasFeeCap(), tx.GasTipCap())
 
 	return pool.signer.SignTx(tx)
 }
