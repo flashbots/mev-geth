@@ -119,12 +119,11 @@ func TestUserOpTracerBansSelfDestructAndDelegateCallOnlyWhenPaymasterModeIsActiv
 				byte(arg.opCode),
 			}
 
-			paymasterOp := DUP1
+			callerCode := []byte{}
 			if arg.paymasterValidationMode {
-				paymasterOp = NUMBER
+				callerCode = append(callerCode, byte(NUMBER))
 			}
 
-			callerCode := []byte{byte(SELFBALANCE), byte(paymasterOp)}
 			for i := 0; i < 5; i++ {
 				callerCode = append(callerCode, byte(PUSH32))
 				callerCode = append(callerCode, common.Hex2BytesFixed("0x00", 32)...)

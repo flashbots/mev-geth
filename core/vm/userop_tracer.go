@@ -15,6 +15,44 @@ var (
 	ErrForbiddenOp        = errors.New("Forbidden OpCode used in user operation validation")
 )
 
+// accessList is an accumulator for the set of accounts and storage slots an EVM
+// contract execution touches.
+type accessList map[common.Address]accessListSlots
+
+// accessListSlots is an accumulator for the set of storage slots within a single
+// contract that an EVM contract execution touches.
+type accessListSlots map[common.Hash]struct{}
+
+// addAddress adds an address to the accesslist.
+func (al accessList) addAddress(address common.Address) {
+	// Set address if not previously present
+	if _, present := al[address]; !present {
+		al[address] = make(map[common.Hash]struct{})
+	}
+}
+
+// addSlot adds a storage slot to the accesslist.
+func (al accessList) addSlot(address common.Address, slot common.Hash) {
+	// Set address if not previously present
+	al.addAddress(address)
+
+	// Set the slot on the surely existent storage set
+	al[address][slot] = struct{}{}
+}
+
+// accesslist converts the accesslist to a types.AccessList.
+func (al accessList) accessList() types.AccessList {
+	acl := make(types.AccessList, 0, len(al))
+	for addr, slots := range al {
+		tuple := types.AccessTuple{Address: addr, StorageKeys: []common.Hash{}}
+		for slot := range slots {
+			tuple.StorageKeys = append(tuple.StorageKeys, slot)
+		}
+		acl = append(acl, tuple)
+	}
+	return acl
+}
+
 type UserOpTracer struct {
 	accessList                     accessList
 	forbiddenOps                   map[OpCode]uint
@@ -31,7 +69,7 @@ type UserOpTracer struct {
 
 func NewUserOpTracer(entryPointAddr, paymasterAddr, senderAddr common.Address) *UserOpTracer {
 	return &UserOpTracer{
-		accessList: newAccessList(),
+		accessList: make(accessList),
 		forbiddenOps: map[OpCode]uint{
 			GASPRICE: 0, GASLIMIT: 0, DIFFICULTY: 0, TIMESTAMP: 0,
 			BASEFEE: 0, BLOCKHASH: 0, NUMBER: 0, SELFBALANCE: 0,
@@ -84,7 +122,7 @@ func (uot *UserOpTracer) CaptureEnd(output []byte, gasUsed uint64, t time.Durati
 }
 
 // CaptureState implements the Tracer interface to trace a single step of VM execution.
-func (uot *UserOpTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
+func (uot *UserOpTracer) CaptureState(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
 	if depth == 1 && op == NUMBER {
 		uot.paymasterValidationMode = true
 	}
@@ -114,7 +152,7 @@ func (uot *UserOpTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost 
 }
 
 // CaptureFault implements the Tracer interface to trace an execution fault
-func (uot *UserOpTracer) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
+func (uot *UserOpTracer) CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
 }
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).

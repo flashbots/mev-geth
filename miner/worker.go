@@ -194,8 +194,6 @@ type worker struct {
 
 	flashbots *flashbotsData
 
-	flashbots *flashbotsData
-
 	// Test hooks
 	newTaskHook  func(*task)                        // Method to call upon receiving a new sealing task.
 	skipSealHook func(*task) bool                   // Method to decide whether skipping the sealing.
