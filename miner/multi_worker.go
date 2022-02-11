@@ -85,10 +85,10 @@ func (w *multiWorker) disablePreseal() {
 	}
 }
 
-func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, isLocalBlock func(*types.Block) bool, init bool) *multiWorker {
+func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, isLocalBlock func(header *types.Header) bool, init bool, merger *consensus.Merger) *multiWorker {
 	queue := make(chan *task)
 
-	regularWorker := newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, &flashbotsData{
+	regularWorker := newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, merger, &flashbotsData{
 		isFlashbots: false,
 		queue:       queue,
 	})
@@ -97,13 +97,15 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 
 	for i := 1; i <= config.MaxMergedBundles; i++ {
 		workers = append(workers,
-			newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, &flashbotsData{
+			newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, merger, &flashbotsData{
 				isFlashbots:        true,
 				isMegabundleWorker: false,
 				queue:              queue,
 				maxMergedBundles:   i,
 			}))
 	}
+
+	relayWorkerMap := make(map[common.Address]*worker)
 
 	for i := 0; i < len(config.TrustedRelays); i++ {
 		workers = append(workers,
@@ -114,6 +116,18 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 				relayAddr:          config.TrustedRelays[i],
 			}))
 	}
+
+	eth.TxPool().NewMegabundleHooks = append(eth.TxPool().NewMegabundleHooks, func(relayAddr common.Address, megabundle *types.MevBundle) {
+		worker, found := relayWorkerMap[relayAddr]
+		if !found {
+			return
+		}
+
+		select {
+		case worker.newMegabundleCh <- megabundle:
+		default:
+		}
+	})
 
 	log.Info("creating multi worker", "config.MaxMergedBundles", config.MaxMergedBundles, "config.TrustedRelays", config.TrustedRelays, "worker", len(workers))
 	return &multiWorker{

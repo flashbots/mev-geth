@@ -253,13 +253,14 @@ type TxPool struct {
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
 	journal *txJournal  // Journal of local transaction to back up to disk
 
-	pending     map[common.Address]*txList   // All currently processable transactions
-	queue       map[common.Address]*txList   // Queued but non-processable transactions
-	beats       map[common.Address]time.Time // Last heartbeat from each known account
-	mevBundles  []types.MevBundle
-	megabundles map[common.Address]types.MevBundle // One megabundle per each trusted relay
-	all         *txLookup                          // All transactions to allow lookups
-	priced      *txPricedList                      // All transactions sorted by price
+	pending            map[common.Address]*txList   // All currently processable transactions
+	queue              map[common.Address]*txList   // Queued but non-processable transactions
+	beats              map[common.Address]time.Time // Last heartbeat from each known account
+	mevBundles         []types.MevBundle
+	megabundles        map[common.Address]types.MevBundle // One megabundle per each trusted relay
+	NewMegabundleHooks []func(common.Address, *types.MevBundle)
+	all                *txLookup     // All transactions to allow lookups
+	priced             *txPricedList // All transactions sorted by price
 
 	chainHeadCh     chan ChainHeadEvent
 	chainHeadSub    event.Subscription
@@ -630,13 +631,20 @@ func (pool *TxPool) AddMegabundle(relayAddr common.Address, txs types.Transactio
 		return errors.New("megabundle from non-trusted address")
 	}
 
-	pool.megabundles[relayAddr] = types.MevBundle{
+	megabundle := types.MevBundle{
 		Txs:               txs,
 		BlockNumber:       blockNumber,
 		MinTimestamp:      minTimestamp,
 		MaxTimestamp:      maxTimestamp,
 		RevertingTxHashes: revertingTxHashes,
 	}
+
+	pool.megabundles[relayAddr] = megabundle
+
+	for _, hook := range pool.NewMegabundleHooks {
+		go hook(relayAddr, &megabundle)
+	}
+
 	return nil
 }
 
@@ -1286,16 +1294,18 @@ func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirt
 			pendingBaseFee := misc.CalcBaseFee(pool.chainconfig, reset.newHead)
 			pool.priced.SetBaseFee(pendingBaseFee)
 		}
+		// Update all accounts to the latest known pending nonce
+		nonces := make(map[common.Address]uint64, len(pool.pending))
+		for addr, list := range pool.pending {
+			highestPending := list.LastElement()
+			nonces[addr] = highestPending.Nonce() + 1
+		}
+		pool.pendingNonces.setAll(nonces)
 	}
 	// Ensure pool.queue and pool.pending sizes stay within the configured limits.
 	pool.truncatePending()
 	pool.truncateQueue()
 
-	// Update all accounts to the latest known pending nonce
-	for addr, list := range pool.pending {
-		highestPending := list.LastElement()
-		pool.pendingNonces.set(addr, highestPending.Nonce()+1)
-	}
 	dropBetweenReorgHistogram.Update(int64(pool.changesSinceReorg))
 	pool.changesSinceReorg = 0 // Reset change counter
 	pool.mu.Unlock()
