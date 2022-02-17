@@ -239,7 +239,7 @@ func (pool *UserOpPool) Stop() {
 }
 
 // AddUserOp adds a user operation to the pool
-func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.Address) error {
+func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.Address) (common.Hash, error) {
 	// TODO: Sanity checks here, check out nethermind
 
 	pool.mu.Lock()
@@ -256,27 +256,33 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 			poolUserOp := pool.byEntryPoint[toUpgrade.entryPointAddr][toUpgrade.index]
 			if userOp.GasTipCap.Cmp(poolUserOp.GasTipCap) <= 0 {
 				// not enough increment of gas fee for upgrade
-				return ErrSenderNonceUserOpInPool
+				return common.Hash{}, ErrSenderNonceUserOpInPool
 			}
 			requiredInc := new(big.Int).Div(poolUserOp.GasTipCap, new(big.Int).SetUint64(10))
 			if new(big.Int).Sub(userOp.GasTipCap, poolUserOp.GasTipCap).Cmp(requiredInc) <= 0 {
 				// not enough increment of gas fee for upgrade
-				return ErrSenderNonceUserOpInPool
+				return common.Hash{}, ErrSenderNonceUserOpInPool
 			}
 		}
 	}
 
 	if !isUpgrade && uint(len(pool.bySender[userOp.Sender])) >= pool.config.maxUserOpsPerSender {
-		return ErrSenderNonceUserOpInPool
+		return common.Hash{}, ErrSenderNonceUserOpInPool
 	}
 
 	simmed, err := pool.simulateOnAdd(userOp, entryPointAddr)
 	if err != nil {
 		log.Info("Discarding user operation because it didn't pass simulation")
-		return err
+		return common.Hash{}, err
 	}
 
-	log.Info("Adding user operation to the pool")
+	requestId, err := simmed.ToAbi().RequestId(*entryPointAddr, pool.chainConfig.ChainID)
+	if err != nil {
+		return requestId, err
+	}
+
+	log.Info("Adding user operation to the pool", "requestId", requestId)
+
 	if isUpgrade {
 		// remove from the pool and bySender map the user operation that is being upgraded
 		pool.removeUserOp(toUpgrade)
@@ -293,7 +299,8 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 		index:          len(pool.byEntryPoint[*entryPointAddr]),
 	}
 	pool.byEntryPoint[*entryPointAddr] = append(pool.byEntryPoint[*entryPointAddr], simmed)
-	return nil
+
+	return requestId, nil
 }
 
 func (pool *UserOpPool) removeUserOp(location uoPoolLocation) {

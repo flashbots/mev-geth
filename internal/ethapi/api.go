@@ -2100,7 +2100,7 @@ type SendUserOperationArgs struct {
 	PaymasterData *hexutil.Bytes  `json:"paymasterData"`
 }
 
-func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, args SendUserOperationArgs, entryPointAddr *common.Address) error {
+func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, args SendUserOperationArgs, entryPointAddr *common.Address) (common.Hash, error) {
 	return s.b.SendUserOperation(ctx, &types.UserOp{
 		Nonce:              uint64(*args.Nonce),
 		Signature:          *args.Signature,
