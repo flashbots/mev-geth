@@ -388,6 +388,26 @@ var (
 		Usage: "Maximum amount of time non-executable transaction are queued",
 		Value: ethconfig.Defaults.TxPool.Lifetime,
 	}
+	// User operation pool settings
+	UserOpBundlingEnabledFlag = cli.BoolFlag{
+		Name:  "uopool.bundle",
+		Usage: "Enable bundling of user operations",
+	}
+	UserOpPoolEntryPointsFlag = cli.StringSliceFlag{
+		Name:  "uopool.entrypoints",
+		Usage: "EntryPoint contracts supported by this node",
+		Value: &cli.StringSlice{"0x90f3E1105E63C877bF9587DE5388C23Cdb702c6B"},
+	}
+	UserOpPoolMaxBundledFlag = cli.UintFlag{
+		Name:  "uopool.max-bundled",
+		Usage: "Maximum amount of user operations to bundle in a transaction",
+		Value: 1,
+	}
+	UserOpPoolMaxPerSenderFlag = cli.UintFlag{
+		Name:  "uopool.max-per-sender",
+		Usage: "Maximum amount of user operations a sender can have at any time in the pool",
+		Value: 10,
+	}
 	// Performance tuning settings
 	CacheFlag = cli.IntFlag{
 		Name:  "cache",
@@ -1375,6 +1395,18 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	}
 }
 
+func setUserOpPool(ctx *cli.Context, cfg *core.UserOpPoolConfig) {
+	cfg.MaxBundled = ctx.GlobalUint(UserOpPoolMaxBundledFlag.Name)
+	cfg.MaxPerSender = ctx.GlobalUint(UserOpPoolMaxPerSenderFlag.Name)
+	for _, addr := range ctx.GlobalStringSlice(UserOpPoolEntryPointsFlag.Name) {
+		if trimmed := strings.TrimSpace(addr); !common.IsHexAddress(trimmed) {
+			log.Error("Invalid EntryPoint address", "address", trimmed)
+		} else {
+			cfg.EntryPoints = append(cfg.EntryPoints, common.HexToAddress(addr))
+		}
+	}
+}
+
 func setEthash(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(EthashCacheDirFlag.Name) {
 		cfg.Ethash.CacheDir = ctx.GlobalString(EthashCacheDirFlag.Name)
@@ -1523,6 +1555,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setEtherbase(ctx, ks, cfg)
 	setGPO(ctx, &cfg.GPO, ctx.GlobalString(SyncModeFlag.Name) == "light")
 	setTxPool(ctx, &cfg.TxPool)
+	setUserOpPool(ctx, &cfg.UserOpPool)
 	setEthash(ctx, cfg)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)

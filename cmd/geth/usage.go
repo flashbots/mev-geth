@@ -108,6 +108,15 @@ var AppHelpFlagGroups = []flags.FlagGroup{
 		},
 	},
 	{
+		Name: "USER OPERATION POOL",
+		Flags: []cli.Flag{
+			utils.UserOpBundlingEnabledFlag,
+			utils.UserOpPoolEntryPointsFlag,
+			utils.UserOpPoolMaxBundledFlag,
+			utils.UserOpPoolMaxPerSenderFlag,
+		},
+	},
+	{
 		Name: "PERFORMANCE TUNING",
 		Flags: []cli.Flag{
 			utils.CacheFlag,

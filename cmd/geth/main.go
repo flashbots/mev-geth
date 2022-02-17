@@ -92,6 +92,10 @@ var (
 		utils.TxPoolAccountQueueFlag,
 		utils.TxPoolGlobalQueueFlag,
 		utils.TxPoolLifetimeFlag,
+		utils.UserOpBundlingEnabledFlag,
+		utils.UserOpPoolEntryPointsFlag,
+		utils.UserOpPoolMaxBundledFlag,
+		utils.UserOpPoolMaxPerSenderFlag,
 		utils.SyncModeFlag,
 		utils.ExitWhenSyncedFlag,
 		utils.GCModeFlag,
@@ -431,6 +435,22 @@ func startNode(ctx *cli.Context, stack *node.Node, backend ethapi.Backend, isCon
 		threads := ctx.GlobalInt(utils.MinerThreadsFlag.Name)
 		if err := ethBackend.StartMining(threads); err != nil {
 			utils.Fatalf("Failed to start mining: %v", err)
+		}
+	}
+
+	if ctx.GlobalBool(utils.UserOpBundlingEnabledFlag.Name) || ctx.GlobalBool(utils.DeveloperFlag.Name) {
+		// If the miner is not running, warn the user
+		if !ctx.GlobalBool(utils.MiningEnabledFlag.Name) && !ctx.GlobalBool(utils.DeveloperFlag.Name) {
+			utils.Fatalf("Trying to bundle user ops without mining")
+		}
+
+		ethBackend, ok := backend.(*eth.EthAPIBackend)
+		if !ok {
+			utils.Fatalf("Ethereum service not running")
+		}
+		// start bundling user operations
+		if err := ethBackend.StartUserOpBundling(); err != nil {
+			utils.Fatalf("Failed to start bundling user operations: %v", err)
 		}
 	}
 }
