@@ -164,30 +164,11 @@ func deployAAContracts(t *testing.T, chain blockChainWithContext, userAddr commo
 }
 
 func signUserOperation(t *testing.T, userOp *types.UserOp, entryPointAddr common.Address, chainId *big.Int, key *ecdsa.PrivateKey) (*types.UserOp, error) {
-	userOpAbi := abi.Arguments{entrypoint.Contract.Abi.Methods["simulateValidation"].Inputs[0]}
-	packedUserOp, err := userOpAbi.Pack(userOp.ToAbi())
+	requestId, err := userOp.ToAbi().RequestId(entryPointAddr, chainId)
 	if err != nil {
-		t.Logf("Couldn't pack user op for signing: %v\n", err)
 		return userOp, err
 	}
-	packedUserOp = packedUserOp[32 : len(packedUserOp)-32]
-	hashedUserOp := crypto.Keccak256Hash(packedUserOp)
-
-	bytes32Type, _ := abi.NewType("bytes32", "", nil)
-	addressType, _ := abi.NewType("address", "", nil)
-	uint256Type, _ := abi.NewType("uint256", "", nil)
-	requestIdAbi := abi.Arguments{
-		abi.Argument{Name: "userOp", Type: bytes32Type},
-		abi.Argument{Name: "entryPoint", Type: addressType},
-		abi.Argument{Name: "chainId", Type: uint256Type},
-	}
-	requestId, err := requestIdAbi.Pack(hashedUserOp, entryPointAddr, chainId)
-	if err != nil {
-		return nil, err
-	}
-	hashedRequestId := crypto.Keccak256Hash(requestId)
-
-	msg := accounts.TextHash(hashedRequestId.Bytes())
+	msg := accounts.TextHash(requestId.Bytes())
 	userOp.Signature, err = crypto.Sign(msg, key)
 
 	// geth generates signature where v value is 0 or 1
@@ -250,7 +231,7 @@ func TestSimulateUserOp(t *testing.T) {
 		t.Fatalf("Error signing test UserOp: %s", err)
 	}
 
-	_, simErr := pool.SimulateUserOp(userOp, &contracts.entryPointAddr, pool.chain.CurrentBlock())
+	_, simErr := pool.simulateUserOp(userOp, &contracts.entryPointAddr, pool.chain.CurrentBlock())
 	if simErr != nil {
 		t.Fatalf("Simulation of user operation failed: %s", simErr)
 	}
