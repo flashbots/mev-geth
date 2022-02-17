@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -54,14 +55,31 @@ func (mevPool *testMevPool) AddMevBundle(txs types.Transactions, blockNumber *bi
 	return nil
 }
 
-type testSigner struct{}
+type testWallet struct{}
 
-func (signer testSigner) Address() common.Address {
-	return common.Address{}
+func (testWallet) URL() accounts.URL              { return accounts.URL{} }
+func (testWallet) Status() (string, error)        { return "", nil }
+func (testWallet) Open(string) error              { return nil }
+func (testWallet) Close() error                   { return nil }
+func (testWallet) Accounts() []accounts.Account   { return []accounts.Account{} }
+func (testWallet) Contains(accounts.Account) bool { return false }
+func (testWallet) Derive(accounts.DerivationPath, bool) (accounts.Account, error) {
+	return accounts.Account{}, nil
 }
-
-func (signer testSigner) SignTx(tx *types.Transaction) (*types.Transaction, error) {
+func (testWallet) SelfDerive([]accounts.DerivationPath, ethereum.ChainStateReader) {}
+func (testWallet) SignData(accounts.Account, string, []byte) ([]byte, error)       { return []byte{}, nil }
+func (testWallet) SignDataWithPassphrase(accounts.Account, string, string, []byte) ([]byte, error) {
+	return []byte{}, nil
+}
+func (testWallet) SignText(accounts.Account, []byte) ([]byte, error) { return []byte{}, nil }
+func (testWallet) SignTextWithPassphrase(accounts.Account, string, []byte) ([]byte, error) {
+	return []byte{}, nil
+}
+func (testWallet) SignTx(account accounts.Account, tx *types.Transaction, chainId *big.Int) (*types.Transaction, error) {
 	return tx, nil
+}
+func (testWallet) SignTxWithPassphrase(accounts.Account, string, *types.Transaction, *big.Int) (*types.Transaction, error) {
+	return nil, nil
 }
 
 func newTestUserOpPool() *UserOpPool {
@@ -77,6 +95,8 @@ func newTestUserOpPool() *UserOpPool {
 		chainConfig: params.TestChainConfig,
 		chain:       &chain,
 		mevPool:     &testMevPool{},
+
+		signerWallet: testWallet{},
 
 		byEntryPoint: make(map[common.Address][]*types.SimulatedUserOp),
 	}
