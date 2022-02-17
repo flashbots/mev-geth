@@ -86,7 +86,9 @@ func (userOp *UserOpAbi) RequestId(entryPointAddr common.Address, chainId *big.I
 		return common.Hash{}, err
 	}
 	userOpAbiArgs := abi.Arguments{abi.Argument{Name: "userOp", Type: userOpAbiType}}
-	packedUserOp, err := userOpAbiArgs.Pack(userOp)
+	userOpWithoutSig := *userOp
+	userOpWithoutSig.Signature = []byte{}
+	packedUserOp, err := userOpAbiArgs.Pack(userOpWithoutSig)
 	if err != nil {
 		return common.Hash{}, err
 	}
