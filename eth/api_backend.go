@@ -243,6 +243,10 @@ func (b *EthAPIBackend) SendUserOperation(ctx context.Context, userOp *types.Use
 	return b.eth.userOpPool.AddUserOp(userOp, entryPointAddr)
 }
 
+func (b *EthAPIBackend) StartUserOpBundling() error {
+	return b.eth.StartUserOpBundling()
+}
+
 func (b *EthAPIBackend) SendBundle(ctx context.Context, txs types.Transactions, blockNumber rpc.BlockNumber, minTimestamp uint64, maxTimestamp uint64, revertingTxHashes []common.Hash) error {
 	return b.eth.txPool.AddMevBundle(txs, big.NewInt(blockNumber.Int64()), minTimestamp, maxTimestamp, revertingTxHashes)
 }
