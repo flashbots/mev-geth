@@ -77,7 +77,6 @@ func newTestUserOpPool() *UserOpPool {
 		chainConfig: params.TestChainConfig,
 		chain:       &chain,
 		mevPool:     &testMevPool{},
-		signer:      &testSigner{},
 
 		byEntryPoint: make(map[common.Address][]*types.SimulatedUserOp),
 	}
