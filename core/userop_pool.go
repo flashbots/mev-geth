@@ -387,9 +387,11 @@ func (pool *UserOpPool) simulateOnBundle(simmedUserOp *types.SimulatedUserOp, en
 		return simErr
 	}
 
-	if !accessList.Equals(simmedUserOp.AccessList) {
-		return ErrUserOpReSimulationFailed
-	}
+	// TODO(jmederos): Should we enforce access lists to be the same?
+	_ = accessList
+	// if !accessList.Equals(simmedUserOp.AccessList) {
+	// 	return ErrUserOpReSimulationFailed
+	// }
 
 	return nil
 }
