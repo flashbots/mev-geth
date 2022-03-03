@@ -239,7 +239,7 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 	return b.eth.txPool.AddLocal(signedTx)
 }
 
-func (b *EthAPIBackend) SendUserOperation(ctx context.Context, userOp *types.UserOp, entryPointAddr *common.Address) error {
+func (b *EthAPIBackend) SendUserOperation(ctx context.Context, userOp *types.UserOp, entryPointAddr *common.Address) (common.Hash, error) {
 	return b.eth.userOpPool.AddUserOp(userOp, entryPointAddr)
 }
 

@@ -164,30 +164,11 @@ func deployAAContracts(t *testing.T, chain blockChainWithContext, userAddr commo
 }
 
 func signUserOperation(t *testing.T, userOp *types.UserOp, entryPointAddr common.Address, chainId *big.Int, key *ecdsa.PrivateKey) (*types.UserOp, error) {
-	userOpAbi := abi.Arguments{entrypoint.Contract.Abi.Methods["simulateValidation"].Inputs[0]}
-	packedUserOp, err := userOpAbi.Pack(userOp.ToAbi())
+	requestId, err := userOp.ToAbi().RequestId(entryPointAddr, chainId)
 	if err != nil {
-		t.Logf("Couldn't pack user op for signing: %v\n", err)
 		return userOp, err
 	}
-	packedUserOp = packedUserOp[32 : len(packedUserOp)-32]
-	hashedUserOp := crypto.Keccak256Hash(packedUserOp)
-
-	bytes32Type, _ := abi.NewType("bytes32", "", nil)
-	addressType, _ := abi.NewType("address", "", nil)
-	uint256Type, _ := abi.NewType("uint256", "", nil)
-	requestIdAbi := abi.Arguments{
-		abi.Argument{Name: "userOp", Type: bytes32Type},
-		abi.Argument{Name: "entryPoint", Type: addressType},
-		abi.Argument{Name: "chainId", Type: uint256Type},
-	}
-	requestId, err := requestIdAbi.Pack(hashedUserOp, entryPointAddr, chainId)
-	if err != nil {
-		return nil, err
-	}
-	hashedRequestId := crypto.Keccak256Hash(requestId)
-
-	msg := accounts.TextHash(hashedRequestId.Bytes())
+	msg := accounts.TextHash(requestId.Bytes())
 	userOp.Signature, err = crypto.Sign(msg, key)
 
 	// geth generates signature where v value is 0 or 1
@@ -253,5 +234,54 @@ func TestSimulateUserOp(t *testing.T) {
 	_, simErr := pool.simulateUserOp(userOp, &contracts.entryPointAddr, pool.chain.CurrentBlock())
 	if simErr != nil {
 		t.Fatalf("Simulation of user operation failed: %s", simErr)
+	}
+}
+
+func TestUserOperationReqId(t *testing.T) {
+	entryPointAddr := common.HexToAddress("0x90f3E1105E63C877bF9587DE5388C23Cdb702c6B")
+	chainId := big.NewInt(5)
+
+	args := map[*types.UserOp]common.Hash{
+		{
+			Sender:             common.HexToAddress("0x05c022028ef3e2c61b3babe0fbc8f658bc4b431f"),
+			Nonce:              5,
+			CallData:           common.FromHex("0x2b311337000000000000000000000000000000000000000000000000000000000000012c"),
+			InitCode:           []byte{},
+			CallGas:            21000,
+			VerificationGas:    21000,
+			PreVerificationGas: 21000,
+			GasFeeCap:          big.NewInt(2100000000),
+			GasTipCap:          big.NewInt(2100000000),
+			Paymaster:          common.Address{},
+			PaymasterData:      []byte{},
+			Signature:          []byte{},
+		}: common.HexToHash("0x9f5d37eb5cc7b0707b2898b1da01fa7aac806a18d531b17a981994bc512cbfc8"),
+		{
+			Sender:             common.HexToAddress("0x65f1326ef62E7b63B2EdF41840E37eB2a0F97515"),
+			Nonce:              7,
+			CallData:           common.Hex2Bytes("80c5c7d000000000000000000000000017e4493e5dc3e0bafdb68147cf15f52f669ef91d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000004278ddd3c00000000000000000000000000000000000000000000000000000000"),
+			InitCode:           []byte{},
+			CallGas:            29129,
+			VerificationGas:    100000,
+			PreVerificationGas: 21000,
+			GasFeeCap:          big.NewInt(1000000007),
+			GasTipCap:          big.NewInt(1000000000),
+			Paymaster:          common.Address{},
+			PaymasterData:      []byte{},
+			Signature:          common.Hex2Bytes("e4ef96c1ebffdae061838b79a0ba2b0289083099dc4d576a7ed0c61c80ed893273ba806a581c72be9e550611defe0bf490f198061b8aa63dd6acfc0b620e0c871c"),
+		}: common.HexToHash("0x87c3605deda77b02b78e62157309985d94531cf7fbb13992c602c8555bece921"),
+	}
+
+	for userOp, expected := range args {
+		t.Run("", func(t *testing.T) {
+			requestId, err := userOp.ToAbi().RequestId(entryPointAddr, chainId)
+			if err != nil {
+				t.Fatalf("Couldn't compute requestId: %s", err)
+			}
+
+			if requestId != expected {
+				t.Fatalf("RequestId: expected -> %v actual -> %v", expected, requestId)
+			}
+		})
 	}
 }

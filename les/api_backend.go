@@ -199,8 +199,8 @@ func (b *LesApiBackend) RemoveTx(txHash common.Hash) {
 	b.eth.txPool.RemoveTx(txHash)
 }
 
-func (b *LesApiBackend) SendUserOperation(ctx context.Context, userOp *types.UserOp, entryPointAddr *common.Address) error {
-	return errors.New("Not Implemented")
+func (b *LesApiBackend) SendUserOperation(ctx context.Context, userOp *types.UserOp, entryPointAddr *common.Address) (common.Hash, error) {
+	return common.Hash{}, errors.New("Not Implemented")
 }
 
 func (b *LesApiBackend) SendBundle(ctx context.Context, txs types.Transactions, blockNumber rpc.BlockNumber, minTimestamp uint64, maxTimestamp uint64, revertingTxHashes []common.Hash) error {
