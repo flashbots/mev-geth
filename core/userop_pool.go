@@ -64,34 +64,15 @@ type noncer interface {
 	Nonce(addr common.Address) uint64
 }
 
-type signer interface {
-	Address() common.Address
-	SignTx(tx *types.Transaction) (*types.Transaction, error)
-}
-
-type walletSigner struct {
-	wallet  accounts.Wallet
-	account accounts.Account
-	chainId *big.Int
-}
-
-func (signer walletSigner) Address() common.Address {
-	return signer.account.Address
-}
-
-func (signer walletSigner) SignTx(tx *types.Transaction) (*types.Transaction, error) {
-	return signer.wallet.SignTx(signer.account, tx, signer.chainId)
-}
-
 type uoPoolLocation struct {
 	entryPointAddr common.Address
 	index          int
 }
 
 type UserOpPoolConfig struct {
-	signerAddr          common.Address
-	maxBundles          uint
-	maxUserOpsPerSender uint
+	MaxBundled   uint
+	MaxPerSender uint
+	EntryPoints  []common.Address
 }
 
 type UserOpPool struct {
@@ -109,7 +90,11 @@ type UserOpPool struct {
 	chain       blockChainWithContext
 	mevPool     mevPool
 	noncer      noncer
-	signer      signer
+
+	bundling      bool
+	etherbase     common.Address
+	signerWallet  accounts.Wallet
+	signerAccount accounts.Account
 
 	// tx hash -> [index]
 	// `index`: is the index of the op in the corresponding `byEntryPoint` pool
@@ -123,46 +108,7 @@ type UserOpPool struct {
 	byEntryPoint map[common.Address][]*types.SimulatedUserOp
 }
 
-func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, chain blockChainWithContext, mevPool mevPool, noncer noncer, accountManager *accounts.Manager) (*UserOpPool, error) {
-	// TODO: Find a better place for this {{{
-
-	var (
-		wallet  accounts.Wallet
-		account accounts.Account
-	)
-	if (config.signerAddr == common.Address{}) {
-		if wallets := accountManager.Wallets(); len(wallets) > 0 {
-			if accounts := wallets[0].Accounts(); len(accounts) > 0 {
-				wallet = wallets[0]
-				account = accounts[0]
-				config.signerAddr = account.Address
-			} else {
-				return nil, ErrSignerAccountNotFound
-			}
-		} else {
-			return nil, ErrSignerAccountNotFound
-		}
-	} else {
-		account = accounts.Account{Address: config.signerAddr}
-		if signerWallet, err := accountManager.Find(account); err == nil {
-			wallet = signerWallet
-		} else {
-			return nil, err
-		}
-	}
-
-	// TODO: Figure out how to properly set default config values
-	if config.maxBundles == 0 {
-		config.maxBundles = 1
-	}
-
-	// TODO: Figure out how to properly set default config values
-	if config.maxUserOpsPerSender == 0 {
-		config.maxUserOpsPerSender = 1
-	}
-
-	// }}}
-
+func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, chain blockChainWithContext, mevPool mevPool, noncer noncer) *UserOpPool {
 	pool := &UserOpPool{
 		config: config,
 
@@ -174,7 +120,6 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 		chain:       chain,
 		mevPool:     mevPool,
 		noncer:      noncer,
-		signer:      &walletSigner{wallet, account, chainConfig.ChainID},
 
 		byTxHash:     make(map[common.Hash][]uoPoolLocation),
 		bySender:     make(map[common.Address]map[uint64]uoPoolLocation),
@@ -182,10 +127,8 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 	}
 
 	pool.chainHeadSub = pool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
-	pool.wg.Add(1)
-	go pool.mainLoop()
 
-	return pool, nil
+	return pool
 }
 
 // mainLoop is the userOp pool's main event loop, waiting for and reacting to
@@ -219,10 +162,15 @@ func (pool *UserOpPool) mainLoop() {
 			return
 
 		case <-pool.chainHeadSub.Err():
-			close(pool.stopCh)
+			pool.stopCh <- struct{}{}
 			return
 		}
 	}
+}
+
+func (pool *UserOpPool) Start() {
+	pool.wg.Add(1)
+	go pool.mainLoop()
 }
 
 func (pool *UserOpPool) Stop() {
@@ -230,12 +178,29 @@ func (pool *UserOpPool) Stop() {
 	pool.chainHeadSub.Unsubscribe()
 
 	// tell mainLoop that we need to shutdown
-	close(pool.stopCh)
+	pool.stopCh <- struct{}{}
 
 	// Wait for workers to stop
 	pool.wg.Wait()
 
 	log.Info("UserOp pool stopped")
+}
+
+func (pool *UserOpPool) SetSigner(wallet accounts.Wallet, account accounts.Account) {
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	pool.signerWallet = wallet
+	pool.signerAccount = account
+}
+
+func (pool *UserOpPool) SetEtherbase(etherbase common.Address) {
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	pool.etherbase = etherbase
+}
+
+func (pool *UserOpPool) Bundling() bool {
+	return pool.bundling
 }
 
 // AddUserOp adds a user operation to the pool
@@ -266,7 +231,7 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 		}
 	}
 
-	if !isUpgrade && uint(len(pool.bySender[userOp.Sender])) >= pool.config.maxUserOpsPerSender {
+	if !isUpgrade && uint(len(pool.bySender[userOp.Sender])) >= pool.config.MaxPerSender {
 		return common.Hash{}, ErrSenderNonceUserOpInPool
 	}
 
@@ -400,7 +365,7 @@ func (pool *UserOpPool) simulateOnBundle(simmedUserOp *types.SimulatedUserOp, en
 // them into a transaction to later be wrapped in an MevBundle
 func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *common.Address) error {
 	gasLimit := head.GasLimit()
-	maxBundles := pool.config.maxBundles
+	maxBundles := pool.config.MaxBundled
 
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
@@ -475,9 +440,9 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 		data []byte
 	)
 	if len(userOps) == 1 {
-		data, err = entrypoint.Contract.PackHandleOp(userOps[0], pool.signer.Address())
+		data, err = entrypoint.Contract.PackHandleOp(userOps[0], pool.etherbase)
 	} else {
-		data, err = entrypoint.Contract.PackHandleOps(userOps, pool.signer.Address())
+		data, err = entrypoint.Contract.PackHandleOps(userOps, pool.etherbase)
 	}
 	if err != nil {
 		return nil, err
@@ -495,7 +460,7 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 	gasFee := new(big.Int).Add(baseFee, gasTip)
 
 	chainId := pool.chainConfig.ChainID
-	nonce := pool.noncer.Nonce(pool.signer.Address())
+	nonce := pool.noncer.Nonce(pool.signerAccount.Address)
 	tx := types.NewTx(&types.DynamicFeeTx{
 		ChainID:   chainId,
 		Nonce:     nonce,
@@ -507,5 +472,5 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 		Data:      data,
 	})
 
-	return pool.signer.SignTx(tx)
+	return pool.signerWallet.SignTx(pool.signerAccount, tx, chainId)
 }

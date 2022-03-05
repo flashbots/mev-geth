@@ -89,9 +89,10 @@ type Ethereum struct {
 
 	APIBackend *EthAPIBackend
 
-	miner     *miner.Miner
-	gasPrice  *big.Int
-	etherbase common.Address
+	miner        *miner.Miner
+	gasPrice     *big.Int
+	etherbase    common.Address
+	bundleSigner common.Address
 
 	networkID     uint64
 	netRPCService *ethapi.PublicNetAPI
@@ -213,10 +214,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
-	eth.userOpPool, err = core.NewUserOpPool(config.UserOpPool, chainConfig, eth.blockchain, eth.txPool, eth.txPool, eth.accountManager)
-	if err != nil {
-		return nil, err
-	}
+	eth.userOpPool = core.NewUserOpPool(config.UserOpPool, chainConfig, eth.blockchain, eth.txPool, eth.txPool)
 
 	// Permit the downloader to use the trie cache allowance during fast sync
 	cacheLimit := cacheConfig.TrieCleanLimit + cacheConfig.TrieDirtyLimit + cacheConfig.SnapshotLimit
@@ -378,6 +376,29 @@ func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 	return common.Address{}, fmt.Errorf("etherbase must be explicitly specified")
 }
 
+func (s *Ethereum) BundleSigner() (common.Address, error) {
+	s.lock.RLock()
+	bundleSigner := s.bundleSigner
+	s.lock.RUnlock()
+
+	if bundleSigner != (common.Address{}) {
+		return bundleSigner, nil
+	}
+	if wallets := s.AccountManager().Wallets(); len(wallets) > 0 {
+		if accounts := wallets[0].Accounts(); len(accounts) > 0 {
+			bundleSigner := accounts[0].Address
+
+			s.lock.Lock()
+			s.bundleSigner = bundleSigner
+			s.lock.Unlock()
+
+			log.Info("Bundle signer automatically configured", "address", bundleSigner)
+			return bundleSigner, nil
+		}
+	}
+	return common.Address{}, fmt.Errorf("bundle signer address must be explicitly specified")
+}
+
 // isLocalBlock checks whether the specified block is mined
 // by local miner accounts.
 //
@@ -439,6 +460,54 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 	s.lock.Unlock()
 
 	s.miner.SetEtherbase(etherbase)
+	s.userOpPool.SetEtherbase(etherbase)
+}
+
+func (s *Ethereum) SetUserOpBundleSigner(signer common.Address) error {
+	account := accounts.Account{Address: signer}
+	wallet, err := s.AccountManager().Find(account)
+	if err != nil {
+		log.Error("Trying to set bundle signer to account unavailable locally", "err", err)
+		return fmt.Errorf("bundle signer account unavailable locally: %v", err)
+	}
+	s.userOpPool.SetSigner(wallet, account)
+
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.bundleSigner = signer
+	return nil
+}
+
+func (s *Ethereum) StartUserOpBundling() error {
+	// Configure the local signing address
+	etherbase, err := s.Etherbase()
+	if err != nil {
+		log.Error("Cannot start bundling user operations without etherbase", "err", err)
+		return fmt.Errorf("etherbase missing: %v", err)
+	}
+
+	addr, err := s.BundleSigner()
+	if err != nil {
+		log.Error("Cannot start bundling user operations without signer", "err", err)
+		return fmt.Errorf("bundle signer missing: %v", err)
+	}
+
+	account := accounts.Account{Address: addr}
+	wallet, err := s.accountManager.Find(account)
+	if wallet == nil || err != nil {
+		log.Error("Bundle signer account unavailable locally", "err", err)
+		return fmt.Errorf("signer missing: %v", err)
+	}
+
+	s.userOpPool.SetEtherbase(etherbase)
+	s.userOpPool.SetSigner(wallet, account)
+	s.userOpPool.Start()
+
+	return nil
+}
+
+func (s *Ethereum) StopBundling() {
+	s.userOpPool.Stop()
 }
 
 // StartMining starts the miner with the given number of CPU threads. If mining
@@ -516,6 +585,7 @@ func (s *Ethereum) AccountManager() *accounts.Manager  { return s.accountManager
 func (s *Ethereum) BlockChain() *core.BlockChain       { return s.blockchain }
 func (s *Ethereum) TxPool() *core.TxPool               { return s.txPool }
 func (s *Ethereum) UserOpPool() *core.UserOpPool       { return s.userOpPool }
+func (s *Ethereum) IsBundling() bool                   { return s.userOpPool.Bundling() }
 func (s *Ethereum) EventMux() *event.TypeMux           { return s.eventMux }
 func (s *Ethereum) Engine() consensus.Engine           { return s.engine }
 func (s *Ethereum) ChainDb() ethdb.Database            { return s.chainDb }
