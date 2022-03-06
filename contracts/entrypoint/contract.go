@@ -35,19 +35,15 @@ func (entryPoint *EntryPoint) PackDeploy(create2Factory common.Address, perOpOve
 }
 
 func (entryPoint *EntryPoint) PackSimulateValidation(op *types.UserOp) ([]byte, error) {
-	return entryPoint.Abi.Pack("simulateValidation", op.ToAbi())
+	return entryPoint.Abi.Pack("simulateValidation", op)
 }
 
 func (entryPoint *EntryPoint) PackHandleOp(op *types.UserOp, redeemer common.Address) ([]byte, error) {
-	return entryPoint.Abi.Pack("handleOp", op.ToAbi(), redeemer)
+	return entryPoint.Abi.Pack("handleOp", op, redeemer)
 }
 
 func (entryPoint *EntryPoint) PackHandleOps(ops []*types.UserOp, redeemer common.Address) ([]byte, error) {
-	userOpsAbi := make([]*types.UserOpAbi, len(ops))
-	for i := range ops {
-		userOpsAbi[i] = ops[i].ToAbi()
-	}
-	return entryPoint.Abi.Pack("handleOps", userOpsAbi, redeemer)
+	return entryPoint.Abi.Pack("handleOps", ops, redeemer)
 }
 
 var Contract = NewEntryPoint(entryPointArtifact)

@@ -183,7 +183,7 @@ func deployAAContracts(t *testing.T, chain blockChainWithContext, userAddr commo
 }
 
 func signUserOperation(t *testing.T, userOp *types.UserOp, entryPointAddr common.Address, chainId *big.Int, key *ecdsa.PrivateKey) (*types.UserOp, error) {
-	requestId, err := userOp.ToAbi().RequestId(entryPointAddr, chainId)
+	requestId, err := userOp.RequestId(entryPointAddr, chainId)
 	if err != nil {
 		return userOp, err
 	}
@@ -213,10 +213,10 @@ func newUserOpThatIncCounter(contracts *testAAContracts) (*types.UserOp, error) 
 	}
 
 	return &types.UserOp{
-		Nonce:              uint64(0),
-		PreVerificationGas: uint64(100000),
-		VerificationGas:    uint64(1000000),
-		CallGas:            uint64(1000000),
+		Nonce:              big.NewInt(0),
+		PreVerificationGas: big.NewInt(100000),
+		VerificationGas:    big.NewInt(1000000),
+		CallGas:            big.NewInt(1000000),
 		GasTipCap:          common.Big0,
 		GasFeeCap:          common.Big256,
 
@@ -263,12 +263,12 @@ func TestUserOperationReqId(t *testing.T) {
 	args := map[*types.UserOp]common.Hash{
 		{
 			Sender:             common.HexToAddress("0x05c022028ef3e2c61b3babe0fbc8f658bc4b431f"),
-			Nonce:              5,
+			Nonce:              big.NewInt(5),
 			CallData:           common.FromHex("0x2b311337000000000000000000000000000000000000000000000000000000000000012c"),
 			InitCode:           []byte{},
-			CallGas:            21000,
-			VerificationGas:    21000,
-			PreVerificationGas: 21000,
+			CallGas:            big.NewInt(21000),
+			VerificationGas:    big.NewInt(21000),
+			PreVerificationGas: big.NewInt(21000),
 			GasFeeCap:          big.NewInt(2100000000),
 			GasTipCap:          big.NewInt(2100000000),
 			Paymaster:          common.Address{},
@@ -277,12 +277,12 @@ func TestUserOperationReqId(t *testing.T) {
 		}: common.HexToHash("0x9f5d37eb5cc7b0707b2898b1da01fa7aac806a18d531b17a981994bc512cbfc8"),
 		{
 			Sender:             common.HexToAddress("0x65f1326ef62E7b63B2EdF41840E37eB2a0F97515"),
-			Nonce:              7,
+			Nonce:              big.NewInt(7),
 			CallData:           common.Hex2Bytes("80c5c7d000000000000000000000000017e4493e5dc3e0bafdb68147cf15f52f669ef91d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000004278ddd3c00000000000000000000000000000000000000000000000000000000"),
 			InitCode:           []byte{},
-			CallGas:            29129,
-			VerificationGas:    100000,
-			PreVerificationGas: 21000,
+			CallGas:            big.NewInt(29129),
+			VerificationGas:    big.NewInt(100000),
+			PreVerificationGas: big.NewInt(21000),
 			GasFeeCap:          big.NewInt(1000000007),
 			GasTipCap:          big.NewInt(1000000000),
 			Paymaster:          common.Address{},
@@ -293,7 +293,7 @@ func TestUserOperationReqId(t *testing.T) {
 
 	for userOp, expected := range args {
 		t.Run("", func(t *testing.T) {
-			requestId, err := userOp.ToAbi().RequestId(entryPointAddr, chainId)
+			requestId, err := userOp.RequestId(entryPointAddr, chainId)
 			if err != nil {
 				t.Fatalf("Couldn't compute requestId: %s", err)
 			}

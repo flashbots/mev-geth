@@ -215,7 +215,7 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 		isUpgrade bool
 	)
 	if byNonce, ok := pool.bySender[userOp.Sender]; ok {
-		if toUpgrade, isUpgrade = byNonce[userOp.Nonce]; isUpgrade {
+		if toUpgrade, isUpgrade = byNonce[userOp.Nonce.Uint64()]; isUpgrade {
 			// this must be an upgrade attempt
 			// get op that the user is trying to upgrade
 			poolUserOp := pool.byEntryPoint[toUpgrade.entryPointAddr][toUpgrade.index]
@@ -241,7 +241,7 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 		return common.Hash{}, err
 	}
 
-	requestId, err := simmed.ToAbi().RequestId(*entryPointAddr, pool.chainConfig.ChainID)
+	requestId, err := simmed.RequestId(*entryPointAddr, pool.chainConfig.ChainID)
 	if err != nil {
 		return requestId, err
 	}
@@ -259,7 +259,7 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 		pool.bySender[userOp.Sender] = make(map[uint64]uoPoolLocation)
 	}
 	// add the new user operation to the pool and bySender map
-	pool.bySender[userOp.Sender][userOp.Nonce] = uoPoolLocation{
+	pool.bySender[userOp.Sender][userOp.Nonce.Uint64()] = uoPoolLocation{
 		entryPointAddr: *entryPointAddr,
 		index:          len(pool.byEntryPoint[*entryPointAddr]),
 	}
@@ -272,7 +272,7 @@ func (pool *UserOpPool) removeUserOp(location uoPoolLocation) {
 	byEntryPoint := pool.byEntryPoint[location.entryPointAddr]
 	userOp := byEntryPoint[location.index]
 	pool.byEntryPoint[location.entryPointAddr] = append(byEntryPoint[:location.index], byEntryPoint[location.index+1:]...)
-	delete(pool.bySender[userOp.Sender], userOp.Nonce)
+	delete(pool.bySender[userOp.Sender], userOp.Nonce.Uint64())
 }
 
 func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *common.Address, block *types.Block) (types.AccessList, error) {
@@ -297,7 +297,7 @@ func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *com
 		return nil, err
 	}
 
-	userOpGas := userOp.PreVerificationGas + userOp.VerificationGas
+	userOpGas := userOp.PreVerificationGas.Uint64() + userOp.VerificationGas.Uint64()
 	res, _, vmErr := evm.Call(vm.AccountRef(common.Address{}), *entryPointAddr, data, userOpGas, common.Big0)
 	if vmErr != nil {
 		if errors.Is(vmErr, vm.ErrExecutionReverted) {
@@ -385,9 +385,9 @@ func (pool *UserOpPool) bundleByEntryPoint(head *types.Block, entryPointAddr *co
 	bundlesCreated := uint(0)
 BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 	for _, simmed := range userOpList {
-		simmedLocation := pool.bySender[simmed.Sender][simmed.Nonce] // it is used several times
+		simmedLocation := pool.bySender[simmed.Sender][simmed.Nonce.Uint64()] // it is used several times
 
-		if totalGasUsed+simmed.PreVerificationGas+simmed.VerificationGas+simmed.CallGas > gasLimit {
+		if totalGasUsed+simmed.PreVerificationGas.Uint64()+simmed.VerificationGas.Uint64()+simmed.CallGas.Uint64() > gasLimit {
 			// Including this userOp in our transaction would make it exceed the block gasLimit
 			continue
 		}
@@ -406,7 +406,7 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 
 		baseFee := misc.CalcBaseFee(pool.chainConfig, head.Header())
 
-		totalGasUsed += simmed.PreVerificationGas + simmed.VerificationGas + simmed.CallGas
+		totalGasUsed += simmed.PreVerificationGas.Uint64() + simmed.VerificationGas.Uint64() + simmed.CallGas.Uint64()
 		includedAccessLists = append(includedAccessLists, simmed.AccessList)
 		includedUserOps = append(includedUserOps, simmed.UserOp)
 		includedLocations = append(includedLocations, simmedLocation)
@@ -454,7 +454,7 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 	gas := uint64(0)
 	gasTip := big.NewInt(0)
 	for _, uo := range userOps {
-		gas += uo.PreVerificationGas + uo.VerificationGas + uo.CallGas + overheadGas
+		gas += uo.PreVerificationGas.Uint64() + uo.VerificationGas.Uint64() + uo.CallGas.Uint64() + overheadGas
 		gasTip = math.BigMax(gasTip, uo.GasTipCap)
 	}
 	gasFee := new(big.Int).Add(baseFee, gasTip)

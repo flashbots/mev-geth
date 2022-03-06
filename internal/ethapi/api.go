@@ -2098,14 +2098,14 @@ func NewPrivateAccountAbstractionAPI(b Backend) *PrivateAccountAbstractionAPI {
 }
 
 type SendUserOperationArgs struct {
-	Nonce     *hexutil.Uint64 `json:"nonce"`
-	Signature *hexutil.Bytes  `json:"signature"`
+	Nonce     *hexutil.Big   `json:"nonce"`
+	Signature *hexutil.Bytes `json:"signature"`
 
-	PreVerificationGas *hexutil.Uint64 `json:"preVerificationGas"`
-	VerificationGas    *hexutil.Uint64 `json:"verificationGas"`
-	CallGas            *hexutil.Uint64 `json:"callGas"`
-	GasFeeCap          *hexutil.Big    `json:"maxFeePerGas"`
-	GasTipCap          *hexutil.Big    `json:"maxPriorityFeePerGas"`
+	PreVerificationGas *hexutil.Big `json:"preVerificationGas"`
+	VerificationGas    *hexutil.Big `json:"verificationGas"`
+	CallGas            *hexutil.Big `json:"callGas"`
+	GasFeeCap          *hexutil.Big `json:"maxFeePerGas"`
+	GasTipCap          *hexutil.Big `json:"maxPriorityFeePerGas"`
 
 	InitCode      *hexutil.Bytes  `json:"initCode"`
 	Sender        *common.Address `json:"sender"`
@@ -2116,11 +2116,11 @@ type SendUserOperationArgs struct {
 
 func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, args SendUserOperationArgs, entryPointAddr *common.Address) (common.Hash, error) {
 	return s.b.SendUserOperation(ctx, &types.UserOp{
-		Nonce:              uint64(*args.Nonce),
+		Nonce:              (*big.Int)(args.Nonce),
 		Signature:          *args.Signature,
-		PreVerificationGas: uint64(*args.PreVerificationGas),
-		VerificationGas:    uint64(*args.VerificationGas),
-		CallGas:            uint64(*args.CallGas),
+		PreVerificationGas: (*big.Int)(args.PreVerificationGas),
+		VerificationGas:    (*big.Int)(args.VerificationGas),
+		CallGas:            (*big.Int)(args.CallGas),
 		GasFeeCap:          (*big.Int)(args.GasFeeCap),
 		GasTipCap:          (*big.Int)(args.GasTipCap),
 		InitCode:           *args.InitCode,

@@ -9,14 +9,14 @@ import (
 )
 
 type UserOp struct {
-	Nonce     uint64
+	Nonce     *big.Int
 	Signature []byte
 
-	PreVerificationGas uint64
-	VerificationGas    uint64
-	CallGas            uint64
-	GasTipCap          *big.Int
-	GasFeeCap          *big.Int
+	PreVerificationGas *big.Int
+	VerificationGas    *big.Int
+	CallGas            *big.Int
+	GasTipCap          *big.Int `abi:"maxPriorityFeePerGas"`
+	GasFeeCap          *big.Int `abi:"maxFeePerGas"`
 
 	InitCode      []byte
 	Sender        common.Address
@@ -31,43 +31,7 @@ type SimulatedUserOp struct {
 	AccessList AccessList
 }
 
-type UserOpAbi struct {
-	Nonce     *big.Int
-	Signature []byte
-
-	PreVerificationGas   *big.Int
-	VerificationGas      *big.Int
-	CallGas              *big.Int
-	MaxPriorityFeePerGas *big.Int
-	MaxFeePerGas         *big.Int
-
-	InitCode      []byte
-	Sender        *common.Address
-	CallData      []byte
-	Paymaster     *common.Address
-	PaymasterData []byte
-}
-
-func (userOp *UserOp) ToAbi() *UserOpAbi {
-	return &UserOpAbi{
-		Nonce:     new(big.Int).SetUint64(userOp.Nonce),
-		Signature: userOp.Signature,
-
-		PreVerificationGas:   new(big.Int).SetUint64(userOp.PreVerificationGas),
-		VerificationGas:      new(big.Int).SetUint64(userOp.VerificationGas),
-		CallGas:              new(big.Int).SetUint64(userOp.CallGas),
-		MaxPriorityFeePerGas: userOp.GasTipCap,
-		MaxFeePerGas:         userOp.GasFeeCap,
-
-		InitCode:      userOp.InitCode,
-		Sender:        &userOp.Sender,
-		CallData:      userOp.CallData,
-		Paymaster:     &userOp.Paymaster,
-		PaymasterData: userOp.PaymasterData,
-	}
-}
-
-func (userOp *UserOpAbi) RequestId(entryPointAddr common.Address, chainId *big.Int) (common.Hash, error) {
+func (userOp *UserOp) RequestId(entryPointAddr common.Address, chainId *big.Int) (common.Hash, error) {
 	userOpAbiType, err := abi.NewType("tuple", "UserOperation", []abi.ArgumentMarshaling{
 		{Name: "sender", Type: "address"},
 		{Name: "nonce", Type: "uint256"},
