@@ -110,22 +110,3 @@ func (userOp *UserOpAbi) RequestId(entryPointAddr common.Address, chainId *big.I
 
 	return crypto.Keccak256Hash(requestId), nil
 }
-
-func (al1 AccessList) Overlaps(al2 AccessList) bool {
-	for _, tuple1 := range al1 {
-		for _, tuple2 := range al2 {
-			if tuple1.Address != tuple2.Address {
-				continue
-			}
-
-			for _, slot1 := range tuple1.StorageKeys {
-				for _, slot2 := range tuple2.StorageKeys {
-					if slot1 == slot2 {
-						return true
-					}
-				}
-			}
-		}
-	}
-	return false
-}

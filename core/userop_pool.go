@@ -336,7 +336,7 @@ func (pool *UserOpPool) simulateOnAdd(userOp *types.UserOp, entryPointAddr *comm
 
 	for _, loc := range pool.bySender[userOp.Sender] {
 		poolUserOp := pool.byEntryPoint[loc.entryPointAddr][loc.index]
-		if accessList.Overlaps(poolUserOp.AccessList) {
+		if alOverlaps(accessList, poolUserOp.AccessList) {
 			// TODO: Maybe this error wrapping is overly complicated
 			return simmed, fmt.Errorf("%w (%s)", ErrUserOpSimulationFailed, "User operation access list overlaps with those already in the pool")
 		}
@@ -399,7 +399,7 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 		}
 
 		for _, al := range includedAccessLists {
-			if simmed.AccessList.Overlaps(al) {
+			if alOverlaps(simmed.AccessList, al) {
 				continue BundleLoop
 			}
 		}
@@ -473,4 +473,23 @@ func (pool *UserOpPool) bundleIntoTx(userOps []*types.UserOp, entryPointAddr *co
 	})
 
 	return pool.signerWallet.SignTx(pool.signerAccount, tx, chainId)
+}
+
+func alOverlaps(al1 types.AccessList, al2 types.AccessList) bool {
+	for _, tuple1 := range al1 {
+		for _, tuple2 := range al2 {
+			if tuple1.Address != tuple2.Address {
+				continue
+			}
+
+			for _, slot1 := range tuple1.StorageKeys {
+				for _, slot2 := range tuple2.StorageKeys {
+					if slot1 == slot2 {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
