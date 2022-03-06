@@ -129,9 +129,3 @@ func (al1 AccessList) Overlaps(al2 AccessList) bool {
 	}
 	return false
 }
-
-type alCacheEntry struct {
-	idx   int
-	slots map[common.Hash]bool
-}
-type alCache map[common.Address]alCacheEntry
