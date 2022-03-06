@@ -23,6 +23,8 @@ type UserOp struct {
 	CallData      []byte
 	Paymaster     common.Address
 	PaymasterData []byte
+
+	EntryPoint common.Address
 }
 
 type SimulatedUserOp struct {
@@ -31,7 +33,10 @@ type SimulatedUserOp struct {
 	AccessList AccessList
 }
 
-func (userOp *UserOp) RequestId(entryPointAddr common.Address, chainId *big.Int) (common.Hash, error) {
+func (userOp UserOp) RequestId(chainId *big.Int) (common.Hash, error) {
+	userOp.Signature = []byte{}
+	entryPointAddr := userOp.EntryPoint
+
 	userOpAbiType, err := abi.NewType("tuple", "UserOperation", []abi.ArgumentMarshaling{
 		{Name: "sender", Type: "address"},
 		{Name: "nonce", Type: "uint256"},
@@ -50,9 +55,7 @@ func (userOp *UserOp) RequestId(entryPointAddr common.Address, chainId *big.Int)
 		return common.Hash{}, err
 	}
 	userOpAbiArgs := abi.Arguments{abi.Argument{Name: "userOp", Type: userOpAbiType}}
-	userOpWithoutSig := *userOp
-	userOpWithoutSig.Signature = []byte{}
-	packedUserOp, err := userOpAbiArgs.Pack(userOpWithoutSig)
+	packedUserOp, err := userOpAbiArgs.Pack(userOp)
 	if err != nil {
 		return common.Hash{}, err
 	}

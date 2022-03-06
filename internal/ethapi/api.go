@@ -2128,7 +2128,8 @@ func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, ar
 		CallData:           *args.CallData,
 		Paymaster:          *args.Paymaster,
 		PaymasterData:      *args.PaymasterData,
-	}, entryPointAddr)
+		EntryPoint:         *entryPointAddr,
+	})
 }
 
 func (s *PrivateAccountAbstractionAPI) SupportedEntryPoints(ctx context.Context) []common.Address {

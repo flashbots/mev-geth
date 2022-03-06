@@ -204,7 +204,7 @@ func (pool *UserOpPool) Bundling() bool {
 }
 
 // AddUserOp adds a user operation to the pool
-func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.Address) (common.Hash, error) {
+func (pool *UserOpPool) AddUserOp(userOp *types.UserOp) (common.Hash, error) {
 	// TODO: Sanity checks here, check out nethermind
 
 	pool.mu.Lock()
@@ -235,13 +235,13 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 		return common.Hash{}, ErrSenderNonceUserOpInPool
 	}
 
-	simmed, err := pool.simulateOnAdd(userOp, entryPointAddr)
+	simmed, err := pool.simulateOnAdd(userOp)
 	if err != nil {
 		log.Info("Discarding user operation because it didn't pass simulation")
 		return common.Hash{}, err
 	}
 
-	requestId, err := simmed.RequestId(*entryPointAddr, pool.chainConfig.ChainID)
+	requestId, err := simmed.RequestId(pool.chainConfig.ChainID)
 	if err != nil {
 		return requestId, err
 	}
@@ -260,10 +260,10 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp, entryPointAddr *common.A
 	}
 	// add the new user operation to the pool and bySender map
 	pool.bySender[userOp.Sender][userOp.Nonce.Uint64()] = uoPoolLocation{
-		entryPointAddr: *entryPointAddr,
-		index:          len(pool.byEntryPoint[*entryPointAddr]),
+		entryPointAddr: userOp.EntryPoint,
+		index:          len(pool.byEntryPoint[userOp.EntryPoint]),
 	}
-	pool.byEntryPoint[*entryPointAddr] = append(pool.byEntryPoint[*entryPointAddr], simmed)
+	pool.byEntryPoint[userOp.EntryPoint] = append(pool.byEntryPoint[userOp.EntryPoint], simmed)
 
 	return requestId, nil
 }
@@ -275,7 +275,7 @@ func (pool *UserOpPool) removeUserOp(location uoPoolLocation) {
 	delete(pool.bySender[userOp.Sender], userOp.Nonce.Uint64())
 }
 
-func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *common.Address, block *types.Block) (types.AccessList, error) {
+func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, block *types.Block) (types.AccessList, error) {
 	state, err := pool.chain.StateAt(block.Root())
 	if err != nil {
 		return nil, err
@@ -286,7 +286,7 @@ func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *com
 		Origin:   common.Address{},
 		GasPrice: block.BaseFee(),
 	}
-	tracer := vm.NewUserOpTracer(*entryPointAddr, userOp.Paymaster, userOp.Sender)
+	tracer := vm.NewUserOpTracer(userOp.EntryPoint, userOp.Paymaster, userOp.Sender)
 	evm := vm.NewEVM(blockCtx, txCtx, state, pool.chainConfig, vm.Config{
 		Tracer: tracer,
 		Debug:  true,
@@ -298,7 +298,7 @@ func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *com
 	}
 
 	userOpGas := userOp.PreVerificationGas.Uint64() + userOp.VerificationGas.Uint64()
-	res, _, vmErr := evm.Call(vm.AccountRef(common.Address{}), *entryPointAddr, data, userOpGas, common.Big0)
+	res, _, vmErr := evm.Call(vm.AccountRef(common.Address{}), userOp.EntryPoint, data, userOpGas, common.Big0)
 	if vmErr != nil {
 		if errors.Is(vmErr, vm.ErrExecutionReverted) {
 			if revert, err := abi.UnpackRevert(res); err == nil {
@@ -322,9 +322,9 @@ func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp, entryPointAddr *com
 	return tracer.AccessList(), nil
 }
 
-func (pool *UserOpPool) simulateOnAdd(userOp *types.UserOp, entryPointAddr *common.Address) (*types.SimulatedUserOp, error) {
+func (pool *UserOpPool) simulateOnAdd(userOp *types.UserOp) (*types.SimulatedUserOp, error) {
 	block := pool.chain.CurrentBlock()
-	accessList, simErr := pool.simulateUserOp(userOp, entryPointAddr, block)
+	accessList, simErr := pool.simulateUserOp(userOp, block)
 	if simErr != nil {
 		return nil, simErr
 	}
@@ -345,9 +345,9 @@ func (pool *UserOpPool) simulateOnAdd(userOp *types.UserOp, entryPointAddr *comm
 	return simmed, nil
 }
 
-func (pool *UserOpPool) simulateOnBundle(simmedUserOp *types.SimulatedUserOp, entryPointAddr *common.Address) error {
+func (pool *UserOpPool) simulateOnBundle(simmedUserOp *types.SimulatedUserOp) error {
 	block := pool.chain.CurrentBlock()
-	accessList, simErr := pool.simulateUserOp(simmedUserOp.UserOp, entryPointAddr, block)
+	accessList, simErr := pool.simulateUserOp(simmedUserOp.UserOp, block)
 	if simErr != nil {
 		return simErr
 	}
@@ -392,7 +392,7 @@ BundleLoop: // TODO: Remove this, I don't really like how this label looks here
 			continue
 		}
 
-		if err := pool.simulateOnBundle(simmed, entryPointAddr); err != nil {
+		if err := pool.simulateOnBundle(simmed); err != nil {
 			log.Info("Drop user operation because it didn't pass resimulation")
 			pool.removeUserOp(simmedLocation)
 			continue

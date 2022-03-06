@@ -183,7 +183,7 @@ func deployAAContracts(t *testing.T, chain blockChainWithContext, userAddr commo
 }
 
 func signUserOperation(t *testing.T, userOp *types.UserOp, entryPointAddr common.Address, chainId *big.Int, key *ecdsa.PrivateKey) (*types.UserOp, error) {
-	requestId, err := userOp.RequestId(entryPointAddr, chainId)
+	requestId, err := userOp.RequestId(chainId)
 	if err != nil {
 		return userOp, err
 	}
@@ -225,6 +225,8 @@ func newUserOpThatIncCounter(contracts *testAAContracts) (*types.UserOp, error) 
 		CallData:      execFromEntryPointCallData,
 		Paymaster:     common.Address{},
 		PaymasterData: []byte{},
+
+		EntryPoint: contracts.entryPointAddr,
 	}, err
 }
 
@@ -250,7 +252,7 @@ func TestSimulateUserOp(t *testing.T) {
 		t.Fatalf("Error signing test UserOp: %s", err)
 	}
 
-	_, simErr := pool.simulateUserOp(userOp, &contracts.entryPointAddr, pool.chain.CurrentBlock())
+	_, simErr := pool.simulateUserOp(userOp, pool.chain.CurrentBlock())
 	if simErr != nil {
 		t.Fatalf("Simulation of user operation failed: %s", simErr)
 	}
@@ -274,6 +276,7 @@ func TestUserOperationReqId(t *testing.T) {
 			Paymaster:          common.Address{},
 			PaymasterData:      []byte{},
 			Signature:          []byte{},
+			EntryPoint:         entryPointAddr,
 		}: common.HexToHash("0x9f5d37eb5cc7b0707b2898b1da01fa7aac806a18d531b17a981994bc512cbfc8"),
 		{
 			Sender:             common.HexToAddress("0x65f1326ef62E7b63B2EdF41840E37eB2a0F97515"),
@@ -288,12 +291,13 @@ func TestUserOperationReqId(t *testing.T) {
 			Paymaster:          common.Address{},
 			PaymasterData:      []byte{},
 			Signature:          common.Hex2Bytes("e4ef96c1ebffdae061838b79a0ba2b0289083099dc4d576a7ed0c61c80ed893273ba806a581c72be9e550611defe0bf490f198061b8aa63dd6acfc0b620e0c871c"),
+			EntryPoint:         entryPointAddr,
 		}: common.HexToHash("0x87c3605deda77b02b78e62157309985d94531cf7fbb13992c602c8555bece921"),
 	}
 
 	for userOp, expected := range args {
 		t.Run("", func(t *testing.T) {
-			requestId, err := userOp.RequestId(entryPointAddr, chainId)
+			requestId, err := userOp.RequestId(chainId)
 			if err != nil {
 				t.Fatalf("Couldn't compute requestId: %s", err)
 			}
