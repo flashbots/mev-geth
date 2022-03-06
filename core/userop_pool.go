@@ -64,6 +64,10 @@ type noncer interface {
 	Nonce(addr common.Address) uint64
 }
 
+type wallet interface {
+	SignTx(accounts.Account, *types.Transaction, *big.Int) (*types.Transaction, error)
+}
+
 type uoPoolLocation struct {
 	entryPointAddr common.Address
 	index          int
@@ -93,7 +97,7 @@ type UserOpPool struct {
 
 	bundling      bool
 	etherbase     common.Address
-	signerWallet  accounts.Wallet
+	signerWallet  wallet
 	signerAccount accounts.Account
 
 	// tx hash -> [index]
@@ -186,7 +190,7 @@ func (pool *UserOpPool) Stop() {
 	log.Info("UserOp pool stopped")
 }
 
-func (pool *UserOpPool) SetSigner(wallet accounts.Wallet, account accounts.Account) {
+func (pool *UserOpPool) SetSigner(wallet wallet, account accounts.Account) {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	pool.signerWallet = wallet
