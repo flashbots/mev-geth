@@ -30,6 +30,10 @@ type testBlockChainWithContext struct {
 	testBlockChain
 }
 
+func (bc *testBlockChain) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
+	return bc.chainHeadFeed.Subscribe(ch)
+}
+
 func (bc *testBlockChainWithContext) CurrentBlock() *types.Block {
 	return types.NewBlock(&types.Header{
 		GasLimit: atomic.LoadUint64(&bc.gasLimit),
@@ -64,10 +68,9 @@ func newTestUserOpPool() *UserOpPool {
 	statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
 	chain := testBlockChainWithContext{testBlockChain{1000000000, statedb, new(event.Feed)}}
 
-	return &UserOpPool{
+	pool := UserOpPool{
 		config: UserOpPoolConfig{},
 
-		initDoneCh:  make(chan struct{}),
 		chainHeadCh: make(chan ChainHeadEvent),
 
 		chainConfig: params.TestChainConfig,
@@ -76,8 +79,11 @@ func newTestUserOpPool() *UserOpPool {
 
 		signerWallet: testWallet{},
 
-		byEntryPoint: make(map[common.Address][]*types.SimulatedUserOp),
+		byEntryPoint: make(map[common.Address]pooledUserOps),
 	}
+
+	pool.setHead(pool.chain.CurrentBlock())
+	return &pool
 }
 
 type testAAContracts struct {
@@ -230,7 +236,7 @@ func TestSimulateUserOp(t *testing.T) {
 		t.Fatalf("Error signing test UserOp: %s", err)
 	}
 
-	_, simErr := pool.simulateUserOp(userOp, pool.chain.CurrentBlock())
+	_, simErr := pool.simulateUserOp(userOp)
 	if simErr != nil {
 		t.Fatalf("Simulation of user operation failed: %s", simErr)
 	}

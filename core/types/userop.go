@@ -27,12 +27,6 @@ type UserOp struct {
 	EntryPoint common.Address
 }
 
-type SimulatedUserOp struct {
-	*UserOp
-
-	AccessList AccessList
-}
-
 func (userOp UserOp) RequestId(chainId *big.Int) (common.Hash, error) {
 	userOp.Signature = []byte{}
 	entryPointAddr := userOp.EntryPoint
