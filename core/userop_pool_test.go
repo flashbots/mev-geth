@@ -94,7 +94,7 @@ type testAAContracts struct {
 	// tokenPaymasterAddr   common.Address
 }
 
-func deployContract(t *testing.T, chain blockChainWithContext, deploymentCode []byte, balance *big.Int) (common.Address, error) {
+func deployContract(t *testing.T, chain blockChainWithLogSubAndContext, deploymentCode []byte, balance *big.Int) (common.Address, error) {
 	block := chain.CurrentBlock()
 	statedb, _ := chain.StateAt(block.Hash())
 	blockCtx := NewEVMBlockContext(block.Header(), chain, &common.Address{})
@@ -115,7 +115,7 @@ func deployContract(t *testing.T, chain blockChainWithContext, deploymentCode []
 	return addr, vmErr
 }
 
-func deployAAContracts(t *testing.T, chain blockChainWithContext, userAddr common.Address) (*testAAContracts, error) {
+func deployAAContracts(t *testing.T, chain blockChainWithLogSubAndContext, userAddr common.Address) (*testAAContracts, error) {
 	var contracts testAAContracts
 
 	if deploy, err := aatestcontracts.SingletonFactory.PackDeploy(); err == nil {
@@ -166,8 +166,8 @@ func deployAAContracts(t *testing.T, chain blockChainWithContext, userAddr commo
 	return &contracts, nil
 }
 
-func signUserOperation(t *testing.T, userOp *types.UserOp, entryPointAddr common.Address, chainId *big.Int, key *ecdsa.PrivateKey) (*types.UserOp, error) {
-	requestId, err := userOp.RequestId(chainId)
+func signUserOperation(t *testing.T, userOp *types.UserOp, entryPointAddr common.Address, key *ecdsa.PrivateKey) (*types.UserOp, error) {
+	requestId, err := userOp.RequestId()
 	if err != nil {
 		return userOp, err
 	}
@@ -185,7 +185,7 @@ func signUserOperation(t *testing.T, userOp *types.UserOp, entryPointAddr common
 	return userOp, err
 }
 
-func newUserOpThatIncCounter(contracts *testAAContracts) (*types.UserOp, error) {
+func newUserOpThatIncCounter(contracts *testAAContracts, chainId *big.Int) (*types.UserOp, error) {
 	countCallData, err := aatestcontracts.TestCounter.PackCount()
 	if err != nil {
 		return nil, err
@@ -210,6 +210,7 @@ func newUserOpThatIncCounter(contracts *testAAContracts) (*types.UserOp, error) 
 		Paymaster:     common.Address{},
 		PaymasterData: []byte{},
 
+		ChainId:    chainId,
 		EntryPoint: contracts.entryPointAddr,
 	}, err
 }
@@ -227,11 +228,11 @@ func TestSimulateUserOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Couldn't deploy account abstraction test contracts: %s", err)
 	}
-	userOp, err := newUserOpThatIncCounter(contracts)
+	userOp, err := newUserOpThatIncCounter(contracts, pool.chainConfig.ChainID)
 	if err != nil {
 		t.Fatalf("Error creating test UserOp: %s", err)
 	}
-	userOp, err = signUserOperation(t, userOp, contracts.entryPointAddr, pool.chainConfig.ChainID, key)
+	userOp, err = signUserOperation(t, userOp, contracts.entryPointAddr, key)
 	if err != nil {
 		t.Fatalf("Error signing test UserOp: %s", err)
 	}
@@ -260,6 +261,7 @@ func TestUserOperationReqId(t *testing.T) {
 			Paymaster:          common.Address{},
 			PaymasterData:      []byte{},
 			Signature:          []byte{},
+			ChainId:            chainId,
 			EntryPoint:         entryPointAddr,
 		}: common.HexToHash("0x9f5d37eb5cc7b0707b2898b1da01fa7aac806a18d531b17a981994bc512cbfc8"),
 		{
@@ -275,13 +277,14 @@ func TestUserOperationReqId(t *testing.T) {
 			Paymaster:          common.Address{},
 			PaymasterData:      []byte{},
 			Signature:          common.Hex2Bytes("e4ef96c1ebffdae061838b79a0ba2b0289083099dc4d576a7ed0c61c80ed893273ba806a581c72be9e550611defe0bf490f198061b8aa63dd6acfc0b620e0c871c"),
+			ChainId:            chainId,
 			EntryPoint:         entryPointAddr,
 		}: common.HexToHash("0x87c3605deda77b02b78e62157309985d94531cf7fbb13992c602c8555bece921"),
 	}
 
 	for userOp, expected := range args {
 		t.Run("", func(t *testing.T) {
-			requestId, err := userOp.RequestId(chainId)
+			requestId, err := userOp.RequestId()
 			if err != nil {
 				t.Fatalf("Couldn't compute requestId: %s", err)
 			}

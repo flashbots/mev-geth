@@ -19,6 +19,7 @@ package eth
 import (
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/eth/protocols/aa"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
 )
@@ -36,6 +37,8 @@ type ethPeer struct {
 	*eth.Peer
 	snapExt  *snapPeer     // Satellite `snap` connection
 	snapWait chan struct{} // Notification channel for snap connections
+	aaExt    *aaPeer       // Satellite `aa` connection
+	aaWait   chan struct{} // Notification channel for aa connections
 }
 
 // info gathers and returns some `eth` protocol metadata known about a peer.
@@ -63,6 +66,24 @@ type snapPeer struct {
 // info gathers and returns some `snap` protocol metadata known about a peer.
 func (p *snapPeer) info() *snapPeerInfo {
 	return &snapPeerInfo{
+		Version: p.Version(),
+	}
+}
+
+// aaPeerInfo represents a short summary of the `aa` sub-protocol metadata known
+// about a connected peer.
+type aaPeerInfo struct {
+	Version uint `json:"version"` // AccountAbstraction protocol version negotiated
+}
+
+// aaPeer is a wrapper around aa.Peer to maintain a few extra metadata.
+type aaPeer struct {
+	*aa.Peer
+}
+
+// info gathers and returns some `aa` protocol metadata known about a peer.
+func (p *aaPeer) info() *aaPeerInfo {
+	return &aaPeerInfo{
 		Version: p.Version(),
 	}
 }

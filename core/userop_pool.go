@@ -16,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
@@ -45,10 +46,10 @@ var (
 
 	// ErrUserOpSimulationFailed is returned if the simulation of the
 	// user operation fails right before being bundled, and prevents it from being included in a tx
-	ErrUserOpReSimulationFailed = errors.New("Simulation of user operation failed before adding to pool")
+	ErrUserOpReSimulationFailed = errors.New("Simulation of user operation failed while being in the pool")
 )
 
-type blockChainWithContext interface {
+type blockChainWithLogSubAndContext interface {
 	blockChain
 	ChainContext
 	SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription
@@ -99,9 +100,11 @@ type UserOpPool struct {
 	logsSub      event.Subscription
 	chainHeadCh  chan ChainHeadEvent
 	chainHeadSub event.Subscription
+	opFeed       event.Feed
+	scope        event.SubscriptionScope
 
 	chainConfig *params.ChainConfig
-	chain       blockChainWithContext
+	chain       blockChainWithLogSubAndContext
 	mevPool     mevPool
 	noncer      noncer
 
@@ -113,7 +116,7 @@ type UserOpPool struct {
 	head  *types.Block
 	state *state.StateDB
 
-	// sender -> (reqId -> userop)
+	// requestId -> userop
 	byReqId map[common.Hash]*pooledUserOp
 
 	// sender -> (nonce -> userop)
@@ -123,7 +126,7 @@ type UserOpPool struct {
 	byEntryPoint map[common.Address]pooledUserOps
 }
 
-func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, chain blockChainWithContext, mevPool mevPool, noncer noncer) *UserOpPool {
+func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, chain blockChainWithLogSubAndContext, mevPool mevPool, noncer noncer) *UserOpPool {
 	pool := &UserOpPool{
 		config: config,
 
@@ -140,10 +143,13 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 		bySender:     make(map[common.Address]map[uint64]*pooledUserOp),
 		byEntryPoint: make(map[common.Address]pooledUserOps),
 	}
+	pool.setHead(pool.chain.CurrentBlock())
 
 	pool.logsSub = pool.chain.SubscribeLogsEvent(pool.logsCh)
 	pool.chainHeadSub = pool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
-	pool.setHead(pool.chain.CurrentBlock())
+
+	pool.wg.Add(1)
+	go pool.mainLoop()
 
 	return pool
 }
@@ -151,7 +157,6 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 // mainLoop is the userOp pool's main event loop, waiting for and reacting to
 // outside blockchain events
 func (pool *UserOpPool) mainLoop() {
-	pool.wg.Add(1)
 	defer pool.wg.Done()
 
 	for {
@@ -160,13 +165,13 @@ func (pool *UserOpPool) mainLoop() {
 
 		case logs := <-pool.logsCh:
 			pool.mu.RLock()
-			for _, log := range logs {
-				if _, supported := pool.byEntryPoint[log.Address]; !supported {
+			for _, l := range logs {
+				entryPoint := l.Address
+				if _, isSupported := pool.byEntryPoint[entryPoint]; !isSupported {
 					continue
 				}
+				log.Debug("Processing new log from supported entryPoint", "entryPoint", entryPoint, "blockNumber", l.BlockNumber)
 
-				// TODO(jmederos): remove included userop according to event/log
-				//
 				// event UserOperationEvent(
 				//   bytes32 indexed requestId,
 				//   address indexed sender,
@@ -176,7 +181,16 @@ func (pool *UserOpPool) mainLoop() {
 				//   uint actualGasPrice,
 				//   bool success
 				// );
-				if pooled, present := pool.byReqId[log.Topics[1]]; present {
+				eventSig := "UserOperationEvent(bytes32,address,address,uint256,uint256,uint256,bool)"
+				eventHash := crypto.Keccak256Hash([]byte(eventSig))
+				if l.Topics[0] != eventHash {
+					continue
+				}
+
+				reqid := l.Topics[1]
+				log.Debug("Processing UserOperationEvent from log", "requestId", reqid.Hex())
+				if pooled, present := pool.byReqId[reqid]; present {
+					log.Debug("Removing userop from pool after inclusion in block", "reqid", reqid.Hex())
 					pooled.invalid = true
 				}
 			}
@@ -184,6 +198,10 @@ func (pool *UserOpPool) mainLoop() {
 
 		case ev := <-pool.chainHeadCh:
 			pool.setHead(ev.Block)
+			if !pool.bundling {
+				log.Debug("Dismissing head event as we're not bundling")
+				continue
+			}
 
 			pool.mu.RLock()
 			for entryPointAddr, byEntryPoint := range pool.byEntryPoint {
@@ -196,13 +214,10 @@ func (pool *UserOpPool) mainLoop() {
 			}
 			pool.mu.RUnlock()
 
-		case <-pool.stopCh:
-			return
-
-		case <-pool.logsSub.Err():
-			return
-
 		case <-pool.chainHeadSub.Err():
+			return
+
+		case <-pool.stopCh:
 			return
 		}
 	}
@@ -219,12 +234,18 @@ func (pool *UserOpPool) setHead(head *types.Block) error {
 }
 
 func (pool *UserOpPool) Start() {
-	go pool.mainLoop()
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	pool.bundling = true
+
+	log.Info("Enable bundling of user operations", "signer", pool.signerAccount.Address.Hex())
 }
 
 func (pool *UserOpPool) Stop() {
+	// Unsubscribe all subscriptions registered from oppool
+	pool.scope.Close()
+
 	// Unsubscribe subscriptions registered from blockchain
-	pool.logsSub.Unsubscribe()
 	pool.chainHeadSub.Unsubscribe()
 
 	// tell mainLoop that we need to shutdown
@@ -234,6 +255,10 @@ func (pool *UserOpPool) Stop() {
 	pool.wg.Wait()
 
 	log.Info("UserOp pool stopped")
+}
+
+func (pool *UserOpPool) SubscribeNewUserOpsEvent(ch chan<- NewUserOpsEvent) event.Subscription {
+	return pool.scope.Track(pool.opFeed.Subscribe(ch))
 }
 
 func (pool *UserOpPool) SetSigner(wallet wallet, account accounts.Account) {
@@ -253,6 +278,12 @@ func (pool *UserOpPool) Bundling() bool {
 	return pool.bundling
 }
 
+func (pool *UserOpPool) Get(reqId common.Hash) *types.UserOp {
+	pool.mu.RLock()
+	defer pool.mu.RUnlock()
+	return &pool.byReqId[reqId].UserOp
+}
+
 // AddUserOp adds a user operation to the pool
 func (pool *UserOpPool) AddUserOp(userOp *types.UserOp) (common.Hash, error) {
 	// TODO: Sanity checks here, check out nethermind
@@ -270,16 +301,17 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp) (common.Hash, error) {
 		return common.Hash{}, err
 	}
 
-	requestId, err := simmed.RequestId(pool.chainConfig.ChainID)
+	requestId, err := simmed.RequestId()
 	if err != nil {
+		log.Error("Error computing request id", "err", err)
 		return requestId, err
 	} else if toUpgrade != nil {
 		// remove from the pool and bySender map the user operation that is being upgraded
 		toUpgrade.invalid = true
-		toUpgradeReqId, _ := toUpgrade.RequestId(pool.chainConfig.ChainID)
-		log.Info("Upgrading user operation", "Old", toUpgradeReqId, "New", requestId)
+		toUpgradeReqId, _ := toUpgrade.RequestId()
+		log.Info("Upgrading user operation", "old", toUpgradeReqId.Hex(), "new", requestId.Hex())
 	} else {
-		log.Info("Adding user operation", "RequestId", requestId)
+		log.Info("Adding user operation", "requestId", requestId.Hex())
 	}
 
 	// create pooled user op
@@ -291,19 +323,23 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp) (common.Hash, error) {
 		pool.bySender[userOp.Sender] = make(map[uint64]*pooledUserOp)
 	}
 
+	// TODO(jmederos): move this to mainLoop
+	// handle this with channels and queues
+	//
 	// add the new user operation to pool maps
 	pool.byReqId[requestId] = &pooled
 	if len(userOp.InitCode) == 0 {
 		pool.bySender[userOp.Sender][userOp.Nonce.Uint64()] = &pooled
 	}
 	pool.byEntryPoint[userOp.EntryPoint] = append(pool.byEntryPoint[userOp.EntryPoint], &pooled)
+	pool.opFeed.Send(NewUserOpsEvent{[]*types.UserOp{userOp}})
 
 	return requestId, nil
 }
 
 func (pool *UserOpPool) validate(op *types.UserOp) (*pooledUserOp, error) {
 	if byNonce, ok := pool.bySender[op.Sender]; ok {
-		if toUpgrade, isUpgrade := byNonce[op.Nonce.Uint64()]; isUpgrade {
+		if toUpgrade, isUpgrade := byNonce[op.Nonce.Uint64()]; isUpgrade && !toUpgrade.invalid {
 			// this must be an upgrade attempt
 			if op.GasTipCap.Cmp(toUpgrade.GasTipCap) <= 0 {
 				// not enough increment of gas fee for upgrade
@@ -326,6 +362,8 @@ func (pool *UserOpPool) validate(op *types.UserOp) (*pooledUserOp, error) {
 }
 
 func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp) (types.AccessList, error) {
+	log.Debug("Simulating user operation", "blockNumber", pool.head.Number())
+
 	blockCtx := NewEVMBlockContext(pool.head.Header(), pool.chain, &common.Address{})
 	txCtx := vm.TxContext{
 		Origin:   common.Address{},
@@ -376,7 +414,7 @@ func (pool *UserOpPool) simulateOnAdd(op *types.UserOp) (simmedUserOp, error) {
 	}
 
 	for _, pooled := range pool.bySender[op.Sender] {
-		if alOverlaps(simmed.al, pooled.al) {
+		if !pooled.invalid && alOverlaps(simmed.al, pooled.al) {
 			return simmed, ErrUserOpSimulationFailed
 		}
 	}
@@ -423,7 +461,7 @@ BundleLoop:
 		if err := pool.mevPool.AddMevBundle(types.Transactions{signedTx}, targetBlock, 0, 0, nil); err != nil {
 			return err
 		}
-		log.Info("Add bundled transaction to mev bundle pool", "len", len(includedUserOps), "hash", signedTx.Hash())
+		log.Info("Add bundled transaction to mev bundle pool", "len", len(includedUserOps), "hash", signedTx.Hash().Hex())
 
 		bundlesCreated += 1
 		if bundlesCreated >= maxBundles {

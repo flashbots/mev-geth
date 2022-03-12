@@ -9,26 +9,25 @@ import (
 )
 
 type UserOp struct {
-	Nonce     *big.Int
-	Signature []byte
-
-	PreVerificationGas *big.Int
-	VerificationGas    *big.Int
+	Sender             common.Address
+	Nonce              *big.Int
+	InitCode           []byte
+	CallData           []byte
 	CallGas            *big.Int
-	GasTipCap          *big.Int `abi:"maxPriorityFeePerGas"`
+	VerificationGas    *big.Int
+	PreVerificationGas *big.Int
 	GasFeeCap          *big.Int `abi:"maxFeePerGas"`
-
-	InitCode      []byte
-	Sender        common.Address
-	CallData      []byte
-	Paymaster     common.Address
-	PaymasterData []byte
-
-	EntryPoint common.Address
+	GasTipCap          *big.Int `abi:"maxPriorityFeePerGas"`
+	Paymaster          common.Address
+	PaymasterData      []byte
+	Signature          []byte
+	EntryPoint         common.Address
+	ChainId            *big.Int `rlp:"-"`
 }
 
-func (userOp UserOp) RequestId(chainId *big.Int) (common.Hash, error) {
+func (userOp UserOp) RequestId() (common.Hash, error) {
 	userOp.Signature = []byte{}
+	chainId := userOp.ChainId
 	entryPointAddr := userOp.EntryPoint
 
 	userOpAbiType, err := abi.NewType("tuple", "UserOperation", []abi.ArgumentMarshaling{

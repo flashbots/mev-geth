@@ -2115,6 +2115,8 @@ type SendUserOperationArgs struct {
 }
 
 func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, args SendUserOperationArgs, entryPointAddr *common.Address) (common.Hash, error) {
+	chainId := s.b.ChainConfig().ChainID
+	// TODO(jmederos): why not standarize chainId as part of the userop
 	return s.b.SendUserOperation(ctx, &types.UserOp{
 		Nonce:              (*big.Int)(args.Nonce),
 		Signature:          *args.Signature,
@@ -2128,6 +2130,7 @@ func (s *PrivateAccountAbstractionAPI) SendUserOperation(ctx context.Context, ar
 		CallData:           *args.CallData,
 		Paymaster:          *args.Paymaster,
 		PaymasterData:      *args.PaymasterData,
+		ChainId:            chainId,
 		EntryPoint:         *entryPointAddr,
 	})
 }

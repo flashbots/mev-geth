@@ -32,6 +32,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/fetcher"
+	"github.com/ethereum/go-ethereum/eth/protocols/aa"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -45,6 +46,9 @@ const (
 	// txChanSize is the size of channel listening to NewTxsEvent.
 	// The number is referenced from the size of tx pool.
 	txChanSize = 4096
+	// opChanSize is the size of channel listening to NewUserOpsEvent.
+	// The number is referenced from the size of op pool.
+	opChanSize = 4096
 )
 
 var (
@@ -74,6 +78,19 @@ type txPool interface {
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
 }
 
+type opPool interface {
+	// Get retrieves the userop from local userop pool with given
+	// request id.
+	Get(hash common.Hash) *types.UserOp
+
+	// AddUserOp should add the given op to the pool.
+	AddUserOp(userOp *types.UserOp) (common.Hash, error)
+
+	// SubscribeNewUserOpsEvent should return an event subscription of
+	// NewUserOpsEvent and send events to the given channel.
+	SubscribeNewUserOpsEvent(chan<- core.NewUserOpsEvent) event.Subscription
+}
+
 // handlerConfig is the collection of initialization parameters to create a full
 // node network handler.
 type handlerConfig struct {
@@ -81,6 +98,7 @@ type handlerConfig struct {
 	Chain      *core.BlockChain          // Blockchain to serve data from
 	TxPool     txPool                    // Transaction pool to propagate from
 	Merger     *consensus.Merger         // The manager for eth1/2 transition
+	UserOpPool opPool                    // UserOp pool to propagate from
 	Network    uint64                    // Network identifier to adfvertise
 	Sync       downloader.SyncMode       // Whether to snap or full sync
 	BloomCache uint64                    // Megabytes to alloc for snap sync bloom
@@ -101,6 +119,7 @@ type handler struct {
 
 	database ethdb.Database
 	txpool   txPool
+	oppool   opPool
 	chain    *core.BlockChain
 	maxPeers int
 
@@ -113,6 +132,8 @@ type handler struct {
 	eventMux      *event.TypeMux
 	txsCh         chan core.NewTxsEvent
 	txsSub        event.Subscription
+	opsCh         chan core.NewUserOpsEvent
+	opsSub        event.Subscription
 	minedBlockSub *event.TypeMuxSubscription
 
 	whitelist map[uint64]common.Hash
@@ -137,6 +158,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		eventMux:   config.EventMux,
 		database:   config.Database,
 		txpool:     config.TxPool,
+		oppool:     config.UserOpPool,
 		chain:      config.Chain,
 		peers:      newPeerSet(),
 		merger:     config.Merger,
@@ -285,6 +307,13 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		peer.Log().Error("Snapshot extension barrier failed", "err", err)
 		return err
 	}
+	// If the peer has a `aa` extension, wait for it to connect so we can have
+	// a uniform initialization/teardown mechanism
+	aa, err := h.peers.waitAAExtension(peer)
+	if err != nil {
+		peer.Log().Error("Account Abstraction extension barrier failed", "err", err)
+		return err
+	}
 	// TODO(karalabe): Not sure why this is needed
 	if !h.chainSync.handlePeerEvent(peer) {
 		return p2p.DiscQuitting
@@ -322,10 +351,10 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 			return p2p.DiscTooManyPeers
 		}
 	}
-	peer.Log().Debug("Ethereum peer connected", "name", peer.Name())
+	peer.Log().Debug("Ethereum peer connected", "name", peer.Name(), "snap", snap != nil, "aa", aa != nil)
 
 	// Register the peer locally
-	if err := h.peers.registerPeer(peer, snap); err != nil {
+	if err := h.peers.registerPeer(peer, snap, aa); err != nil {
 		peer.Log().Error("Ethereum peer registration failed", "err", err)
 		return err
 	}
@@ -459,6 +488,21 @@ func (h *handler) runSnapExtension(peer *snap.Peer, handler snap.Handler) error 
 	return handler(peer)
 }
 
+// runAAExtension registers a `aa` peer and starts handling inbound messages.
+// As `aa` is only a satellite protocol to `eth`, all subsystem registrations
+// and lifecycle management will be done by the main `eth` handler to prevent
+// strange races.
+func (h *handler) runAAExtension(peer *aa.Peer, handler aa.Handler) error {
+	h.peerWG.Add(1)
+	defer h.peerWG.Done()
+
+	if err := h.peers.registerAAExtension(peer); err != nil {
+		peer.Log().Error("Account Abstraction extension registration failed", "err", err)
+		return err
+	}
+	return handler(peer)
+}
+
 // removePeer requests disconnection of a peer.
 func (h *handler) removePeer(id string) {
 	peer := h.peers.peer(id)
@@ -484,7 +528,7 @@ func (h *handler) unregisterPeer(id string) {
 		return
 	}
 	// Remove the `eth` peer if it exists
-	logger.Debug("Removing Ethereum peer", "snap", peer.snapExt != nil)
+	logger.Debug("Removing Ethereum peer", "name", peer.Name(), "snap", peer.snapExt != nil, "aa", peer.aaExt != nil)
 
 	// Remove the `snap` extension if it exists
 	if peer.snapExt != nil {
@@ -507,6 +551,12 @@ func (h *handler) Start(maxPeers int) {
 	h.txsSub = h.txpool.SubscribeNewTxsEvent(h.txsCh)
 	go h.txBroadcastLoop()
 
+	// broadcast user operations
+	h.wg.Add(1)
+	h.opsCh = make(chan core.NewUserOpsEvent, opChanSize)
+	h.opsSub = h.oppool.SubscribeNewUserOpsEvent(h.opsCh)
+	go h.opBroadcastLoop()
+
 	// broadcast mined blocks
 	h.wg.Add(1)
 	h.minedBlockSub = h.eventMux.Subscribe(core.NewMinedBlockEvent{})
@@ -519,6 +569,7 @@ func (h *handler) Start(maxPeers int) {
 
 func (h *handler) Stop() {
 	h.txsSub.Unsubscribe()        // quits txBroadcastLoop
+	h.opsSub.Unsubscribe()        // quits opBroadcastLoop
 	h.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
 
 	// Quit chainSync and txsync64.
@@ -623,6 +674,30 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 		"tx packs", directPeers, "broadcast txs", directCount)
 }
 
+// BroadcastUserOps will propagate a batch of userops
+func (h *handler) BroadcastUserOps(ops []*types.UserOp) {
+	var (
+		directCount int                               // Count of the txs sent directly to peers
+		directPeers int                               // Count of the peers that were sent transactions directly
+		opset       = make(map[*aaPeer][]common.Hash) // Set peer->hash to transfer directly
+	)
+	// Broadcast userops to a batch of peers not knowing about it
+	for _, op := range ops {
+		requestId, _ := op.RequestId()
+		peers := h.peers.peersWithoutUserOp(requestId)
+		// Send the op unconditionally to a subset of our peers
+		for _, peer := range peers {
+			opset[peer] = append(opset[peer], requestId)
+		}
+	}
+	for peer, reqs := range opset {
+		directPeers++
+		directCount += len(reqs)
+		peer.AsyncSendUserOps(reqs)
+	}
+	log.Debug("UserOp broadcast", "ops", len(ops), "op packs", directPeers, "broadcast ops", directCount)
+}
+
 // minedBroadcastLoop sends mined blocks to connected peers.
 func (h *handler) minedBroadcastLoop() {
 	defer h.wg.Done()
@@ -643,6 +718,19 @@ func (h *handler) txBroadcastLoop() {
 		case event := <-h.txsCh:
 			h.BroadcastTransactions(event.Txs)
 		case <-h.txsSub.Err():
+			return
+		}
+	}
+}
+
+// opBroadcastLoop announces new user operations to connected peers.
+func (h *handler) opBroadcastLoop() {
+	defer h.wg.Done()
+	for {
+		select {
+		case event := <-h.opsCh:
+			h.BroadcastUserOps(event.UserOps)
+		case <-h.opsSub.Err():
 			return
 		}
 	}

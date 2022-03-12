@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/eth/protocols/aa"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
 	"github.com/ethereum/go-ethereum/p2p"
@@ -43,16 +44,24 @@ var (
 	// errSnapWithoutEth is returned if a peer attempts to connect only on the
 	// snap protocol without advertizing the eth main protocol.
 	errSnapWithoutEth = errors.New("peer connected on snap without compatible eth support")
+
+	// errAAWithoutEth is returned if a peer attempts to connect only on the
+	// aa protocol without advertizing the eth main protocol.
+	errAAWithoutEth = errors.New("peer connected on aa without compatible eth support")
 )
 
 // peerSet represents the collection of active peers currently participating in
 // the `eth` protocol, with or without the `snap` extension.
 type peerSet struct {
 	peers     map[string]*ethPeer // Peers connected on the `eth` protocol
+	aaPeers   map[string]*aaPeer  // Peers connected on the `aa` sub-protocol
 	snapPeers int                 // Number of `snap` compatible peers for connection prioritization
 
 	snapWait map[string]chan *snap.Peer // Peers connected on `eth` waiting for their snap extension
 	snapPend map[string]*snap.Peer      // Peers connected on the `snap` protocol, but not yet on `eth`
+
+	aaWait map[string]chan *aa.Peer // Peers connected on `eth` waiting for their snap extension
+	aaPend map[string]*aa.Peer      // Peers connected on the `aa` protocol, but not yet on `eth`
 
 	lock   sync.RWMutex
 	closed bool
@@ -62,8 +71,11 @@ type peerSet struct {
 func newPeerSet() *peerSet {
 	return &peerSet{
 		peers:    make(map[string]*ethPeer),
+		aaPeers:  make(map[string]*aaPeer),
 		snapWait: make(map[string]chan *snap.Peer),
 		snapPend: make(map[string]*snap.Peer),
+		aaWait:   make(map[string]chan *aa.Peer),
+		aaPend:   make(map[string]*aa.Peer),
 	}
 }
 
@@ -131,9 +143,73 @@ func (ps *peerSet) waitSnapExtension(peer *eth.Peer) (*snap.Peer, error) {
 	return <-wait, nil
 }
 
+// registerAAExtension unblocks an already connected `eth` peer waiting for its
+// `aa` extension, or if no such peer exists, tracks the extension for the time
+// being until the `eth` main protocol starts looking for it.
+func (ps *peerSet) registerAAExtension(peer *aa.Peer) error {
+	// Reject the peer if it advertises `aa` without `eth` as `aa` is only a
+	// satellite protocol of `eth`
+	if !peer.RunningCap(eth.ProtocolName, eth.ProtocolVersions) {
+		return errAAWithoutEth
+	}
+	// Ensure nobody can double connect
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+
+	id := peer.ID()
+	if _, ok := ps.peers[id]; ok {
+		return errPeerAlreadyRegistered // avoid connections with the same id as existing ones
+	}
+	if _, ok := ps.aaPend[id]; ok {
+		return errPeerAlreadyRegistered // avoid connections with the same id as pending ones
+	}
+	// Inject the peer into an `eth` counterpart is available, otherwise save for later
+	if wait, ok := ps.aaWait[id]; ok {
+		delete(ps.aaWait, id)
+		wait <- peer
+		return nil
+	}
+	ps.aaPend[id] = peer
+	return nil
+}
+
+// waitExtensions blocks until all satellite protocols are connected and tracked
+// by the peerset.
+func (ps *peerSet) waitAAExtension(peer *eth.Peer) (*aa.Peer, error) {
+	// If the peer does not support a compatible `aa`, don't wait
+	if !peer.RunningCap(aa.ProtocolName, aa.ProtocolVersions) {
+		return nil, nil
+	}
+	// Ensure nobody can double connect
+	ps.lock.Lock()
+
+	id := peer.ID()
+	if _, ok := ps.peers[id]; ok {
+		ps.lock.Unlock()
+		return nil, errPeerAlreadyRegistered // avoid connections with the same id as existing ones
+	}
+	if _, ok := ps.aaWait[id]; ok {
+		ps.lock.Unlock()
+		return nil, errPeerAlreadyRegistered // avoid connections with the same id as pending ones
+	}
+	// If `aa` already connected, retrieve the peer from the pending set
+	if aa, ok := ps.aaPend[id]; ok {
+		delete(ps.aaPend, id)
+
+		ps.lock.Unlock()
+		return aa, nil
+	}
+	// Otherwise wait for `snap` to connect concurrently
+	wait := make(chan *aa.Peer)
+	ps.aaWait[id] = wait
+	ps.lock.Unlock()
+
+	return <-wait, nil
+}
+
 // registerPeer injects a new `eth` peer into the working set, or returns an error
 // if the peer is already known.
-func (ps *peerSet) registerPeer(peer *eth.Peer, ext *snap.Peer) error {
+func (ps *peerSet) registerPeer(peer *eth.Peer, snapExt *snap.Peer, aaExt *aa.Peer) error {
 	// Start tracking the new peer
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
@@ -148,9 +224,14 @@ func (ps *peerSet) registerPeer(peer *eth.Peer, ext *snap.Peer) error {
 	eth := &ethPeer{
 		Peer: peer,
 	}
-	if ext != nil {
-		eth.snapExt = &snapPeer{ext}
+	if snapExt != nil {
+		eth.snapExt = &snapPeer{snapExt}
 		ps.snapPeers++
+	}
+	if aaExt != nil {
+		aa := &aaPeer{aaExt}
+		eth.aaExt = aa
+		ps.aaPeers[id] = aa
 	}
 	ps.peers[id] = eth
 	return nil
@@ -169,6 +250,9 @@ func (ps *peerSet) unregisterPeer(id string) error {
 	delete(ps.peers, id)
 	if peer.snapExt != nil {
 		ps.snapPeers--
+	}
+	if peer.aaExt != nil {
+		delete(ps.aaPeers, id)
 	}
 	return nil
 }
@@ -211,6 +295,21 @@ func (ps *peerSet) peersWithoutTransaction(hash common.Hash) []*ethPeer {
 	return list
 }
 
+// peersWithoutUserOp retrieves a list of peers that do not have a given
+// transaction in their set of known hashes.
+func (ps *peerSet) peersWithoutUserOp(reqId common.Hash) []*aaPeer {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+
+	list := make([]*aaPeer, 0, len(ps.aaPeers))
+	for _, p := range ps.aaPeers {
+		if !p.KnownUserOp(reqId) {
+			list = append(list, p)
+		}
+	}
+	return list
+}
+
 // len returns if the current number of `eth` peers in the set. Since the `snap`
 // peers are tied to the existence of an `eth` connection, that will always be a
 // subset of `eth`.
@@ -227,6 +326,14 @@ func (ps *peerSet) snapLen() int {
 	defer ps.lock.RUnlock()
 
 	return ps.snapPeers
+}
+
+// aaLen returns if the current number of `aa` peers in the set.
+func (ps *peerSet) aaLen() int {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+
+	return len(ps.aaPeers)
 }
 
 // peerWithHighestTD retrieves the known peer with the currently highest total

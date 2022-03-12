@@ -24,6 +24,9 @@ import (
 // NewTxsEvent is posted when a batch of transactions enter the transaction pool.
 type NewTxsEvent struct{ Txs []*types.Transaction }
 
+// NewUserOpsEvent is posted when a batch of user operations enter the pool.
+type NewUserOpsEvent struct{ UserOps []*types.UserOp }
+
 // NewMinedBlockEvent is posted when a block has been imported.
 type NewMinedBlockEvent struct{ Block *types.Block }
 
