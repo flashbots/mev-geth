@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -23,7 +24,11 @@ import (
 )
 
 const (
-	overheadGas = uint64(0)
+	overheadGas        = uint64(0)
+	banSlack           = 50
+	throttlingSlack    = 10
+	minInclBundling    = 10
+	minInclNotBundling = 100
 )
 
 // TODO: Check error messages
@@ -73,7 +78,8 @@ type wallet interface {
 
 type simmedUserOp struct {
 	types.UserOp
-	al types.AccessList
+	simmedAt *big.Int
+	al       types.AccessList
 }
 
 type pooledUserOp struct {
@@ -86,7 +92,8 @@ type pooledUserOps []*pooledUserOp
 type UserOpPoolConfig struct {
 	MaxBundled   uint
 	MaxPerSender uint
-	EntryPoints  []common.Address
+
+	EntryPoints []common.Address
 }
 
 type UserOpPool struct {
@@ -122,8 +129,14 @@ type UserOpPool struct {
 	// sender -> (nonce -> userop)
 	bySender map[common.Address]map[uint64]*pooledUserOp
 
+	// paymaster -> [userops]
+	byPaymaster map[common.Address]pooledUserOps
+
 	// entrypoint -> [userops]
 	byEntryPoint map[common.Address]pooledUserOps
+
+	// addr -> paymaster throttler
+	throttlers map[common.Address]*throttler
 }
 
 func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, chain blockChainWithLogSubAndContext, mevPool mevPool, noncer noncer) *UserOpPool {
@@ -141,7 +154,10 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 
 		byReqId:      make(map[common.Hash]*pooledUserOp),
 		bySender:     make(map[common.Address]map[uint64]*pooledUserOp),
+		byPaymaster:  make(map[common.Address]pooledUserOps),
 		byEntryPoint: make(map[common.Address]pooledUserOps),
+
+		throttlers: make(map[common.Address]*throttler),
 	}
 	pool.setHead(pool.chain.CurrentBlock())
 
@@ -154,14 +170,38 @@ func NewUserOpPool(config UserOpPoolConfig, chainConfig *params.ChainConfig, cha
 	return pool
 }
 
+func (pool *UserOpPool) newThrottler(addr common.Address) *throttler {
+	th := throttler{
+		addr:            addr,
+		banSlack:        banSlack,
+		throttlingSlack: throttlingSlack,
+	}
+	if pool.bundling {
+		th.minInclRateDenominator = minInclBundling
+	} else {
+		th.minInclRateDenominator = minInclNotBundling
+	}
+	return &th
+}
+
 // mainLoop is the userOp pool's main event loop, waiting for and reacting to
 // outside blockchain events
 func (pool *UserOpPool) mainLoop() {
 	defer pool.wg.Done()
 
+	throttlerTicker := time.NewTicker(1 * time.Hour)
+	defer throttlerTicker.Stop()
+
 	for {
 		select {
 		// TODO(jmederos): don't lock inside cases
+
+		case <-throttlerTicker.C:
+			pool.mu.RLock()
+			for _, th := range pool.throttlers {
+				th.amortize()
+			}
+			pool.mu.RUnlock()
 
 		case logs := <-pool.logsCh:
 			pool.mu.RLock()
@@ -192,6 +232,9 @@ func (pool *UserOpPool) mainLoop() {
 				if pooled, present := pool.byReqId[reqid]; present {
 					log.Debug("Removing userop from pool after inclusion in block", "reqid", reqid.Hex())
 					pooled.invalid = true
+
+					throttler := pool.throttlers[pooled.Paymaster]
+					throttler.addIncl()
 				}
 			}
 			pool.mu.RUnlock()
@@ -203,8 +246,24 @@ func (pool *UserOpPool) mainLoop() {
 				continue
 			}
 
+			go func() {
+				pool.mu.RLock()
+				defer pool.mu.RUnlock()
+
+				for pm, ops := range pool.byPaymaster {
+					if th, known := pool.throttlers[pm]; known && th.throttled() {
+						for _, op := range ops {
+							if new(big.Int).Sub(pool.head.Number(), op.simmedAt).Uint64() > 10 {
+								op.invalid = true
+							}
+						}
+					}
+				}
+			}()
+
 			pool.mu.RLock()
 			for entryPointAddr, byEntryPoint := range pool.byEntryPoint {
+				// TODO(jmederos): maybe wrap this in `go func() {...`
 				ops := make([]*pooledUserOp, len(byEntryPoint))
 				copy(ops, byEntryPoint)
 				sort.Slice(ops, func(i, j int) bool {
@@ -237,6 +296,11 @@ func (pool *UserOpPool) Start() {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	pool.bundling = true
+	for _, th := range pool.throttlers {
+		th.mu.Lock()
+		th.minInclRateDenominator = minInclBundling
+		th.mu.Unlock()
+	}
 
 	log.Info("Enable bundling of user operations", "signer", pool.signerAccount.Address.Hex())
 }
@@ -286,8 +350,6 @@ func (pool *UserOpPool) Get(reqId common.Hash) *types.UserOp {
 
 // AddUserOp adds a user operation to the pool
 func (pool *UserOpPool) AddUserOp(userOp *types.UserOp) (common.Hash, error) {
-	// TODO: Sanity checks here, check out nethermind
-
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
@@ -317,27 +379,48 @@ func (pool *UserOpPool) AddUserOp(userOp *types.UserOp) (common.Hash, error) {
 	// create pooled user op
 	pooled := pooledUserOp{simmed, false}
 
-	// if bySender has never been used for this sender
-	if pool.bySender[userOp.Sender] == nil {
-		// initialize the `nonce -> op` map
-		pool.bySender[userOp.Sender] = make(map[uint64]*pooledUserOp)
-	}
-
 	// TODO(jmederos): move this to mainLoop
 	// handle this with channels and queues
 	//
 	// add the new user operation to pool maps
 	pool.byReqId[requestId] = &pooled
+	pool.byEntryPoint[userOp.EntryPoint] = append(pool.byEntryPoint[userOp.EntryPoint], &pooled)
 	if len(userOp.InitCode) == 0 {
+		// if bySender has never been used for this sender
+		if _, known := pool.bySender[userOp.Sender]; !known {
+			// initialize the `nonce -> op` map
+			pool.bySender[userOp.Sender] = make(map[uint64]*pooledUserOp)
+		}
 		pool.bySender[userOp.Sender][userOp.Nonce.Uint64()] = &pooled
 	}
-	pool.byEntryPoint[userOp.EntryPoint] = append(pool.byEntryPoint[userOp.EntryPoint], &pooled)
+	if userOp.Paymaster != (common.Address{}) {
+		pool.byPaymaster[userOp.Paymaster] = append(pool.byPaymaster[userOp.Paymaster], &pooled)
+		// if paymasters has never been used for this paymaster
+		if _, known := pool.throttlers[userOp.Paymaster]; !known {
+			// initialize the `paymaster -> status` map
+			pool.throttlers[userOp.Paymaster] = pool.newThrottler(userOp.Paymaster)
+		}
+		throttler := pool.throttlers[userOp.Paymaster]
+		throttler.addSeen()
+	}
 	pool.opFeed.Send(NewUserOpsEvent{[]*types.UserOp{userOp}})
 
 	return requestId, nil
 }
 
 func (pool *UserOpPool) validate(op *types.UserOp) (*pooledUserOp, error) {
+	if throttler, ok := pool.throttlers[op.Paymaster]; ok {
+		if throttler.banned() {
+			return nil, fmt.Errorf("Paymaster banned")
+		} else if throttler.throttled() {
+			for _, op := range pool.byPaymaster[op.Paymaster] {
+				if !op.invalid {
+					return nil, fmt.Errorf("Paymaster throttled and already has ops in the pool")
+				}
+			}
+		}
+	}
+
 	if byNonce, ok := pool.bySender[op.Sender]; ok {
 		if toUpgrade, isUpgrade := byNonce[op.Nonce.Uint64()]; isUpgrade && !toUpgrade.invalid {
 			// this must be an upgrade attempt
@@ -406,7 +489,7 @@ func (pool *UserOpPool) simulateUserOp(userOp *types.UserOp) (types.AccessList, 
 }
 
 func (pool *UserOpPool) simulateOnAdd(op *types.UserOp) (simmedUserOp, error) {
-	simmed := simmedUserOp{UserOp: *op}
+	simmed := simmedUserOp{UserOp: *op, simmedAt: pool.head.Number()}
 	if al, err := pool.simulateUserOp(op); err == nil {
 		simmed.al = al
 	} else {
@@ -533,4 +616,47 @@ func alOverlaps(al1 types.AccessList, al2 types.AccessList) bool {
 		}
 	}
 	return false
+}
+
+type throttler struct {
+	mu sync.RWMutex
+
+	addr common.Address
+
+	minInclRateDenominator    uint
+	throttlingSlack, banSlack uint
+
+	seen uint
+	incl uint
+}
+
+func (th *throttler) amortize() {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	th.seen -= th.seen / 24
+	th.incl -= th.incl / 24
+}
+
+func (th *throttler) addSeen() {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	th.seen += 1
+}
+
+func (th *throttler) addIncl() {
+	th.mu.Lock()
+	defer th.mu.Unlock()
+	th.incl += 1
+}
+
+func (th *throttler) banned() bool {
+	th.mu.RLock()
+	defer th.mu.RUnlock()
+	return th.seen/th.minInclRateDenominator > th.incl+th.banSlack
+}
+
+func (th *throttler) throttled() bool {
+	th.mu.RLock()
+	defer th.mu.RUnlock()
+	return th.seen/th.minInclRateDenominator > th.incl+th.throttlingSlack && !th.banned()
 }
