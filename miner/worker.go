@@ -925,6 +925,7 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 	return receipt.Logs, nil
 }
 
+// Returns whether the bundle should be discarded
 func (w *worker) commitBundle(env *environment, txs types.Transactions, interrupt *int32) bool {
 	gasLimit := env.header.GasLimit
 	if env.gasPool == nil {
@@ -1245,7 +1246,8 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 // fillTransactions retrieves the pending transactions from the txpool and fills them
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
-func (w *worker) fillTransactions(interrupt *int32, env *environment) {
+// Returns whether the block should be discarded.
+func (w *worker) fillTransactions(interrupt *int32, env *environment) bool {
 	// Split the pending transactions into locals and remotes
 	// Fill the block with all available pending transactions.
 	pending := w.eth.TxPool().Pending(true)
@@ -1260,20 +1262,20 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) {
 		bundles, err := w.eth.TxPool().MevBundles(env.header.Number, env.header.Time)
 		if err != nil {
 			log.Error("Failed to fetch pending transactions", "err", err)
-			return
+			return true
 		}
 
 		bundleTxs, bundle, numBundles, err := w.generateFlashbotsBundle(env, bundles, pending)
 		if err != nil {
 			log.Error("Failed to generate flashbots bundle", "err", err)
-			return
+			return true
 		}
 		log.Info("Flashbots bundle", "ethToCoinbase", ethIntToFloat(bundle.totalEth), "gasUsed", bundle.totalGasUsed, "bundleScore", bundle.mevGasPrice, "bundleLength", len(bundleTxs), "numBundles", numBundles, "worker", w.flashbots.maxMergedBundles)
 		if len(bundleTxs) == 0 {
-			return
+			return true
 		}
 		if w.commitBundle(env, bundleTxs, interrupt) {
-			return
+			return true
 		}
 		env.profit.Add(env.profit, bundle.ethSentToCoinbase)
 	}
@@ -1281,7 +1283,7 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) {
 		megabundle, err := w.eth.TxPool().GetMegabundle(w.flashbots.relayAddr, env.header.Number, env.header.Time)
 		log.Info("Starting to process a Megabundle", "relay", w.flashbots.relayAddr, "megabundle", megabundle, "error", err)
 		if err != nil {
-			return // no valid megabundle for this relay, nothing to do
+			return true // no valid megabundle for this relay, nothing to do
 		}
 
 		// Flashbots bundle merging duplicates work by simulating TXes and then committing them once more.
@@ -1289,7 +1291,7 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) {
 		coinbaseBalanceBefore := env.state.GetBalance(env.coinbase)
 		if w.commitBundle(env, megabundle.Txs, interrupt) {
 			log.Info("Could not commit a Megabundle", "relay", w.flashbots.relayAddr, "megabundle", megabundle)
-			return
+			return true
 		}
 		var txStatuses = map[common.Hash]bool{}
 		for _, receipt := range env.receipts {
@@ -1299,11 +1301,11 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) {
 			status, ok := txStatuses[tx.Hash()]
 			if !ok {
 				log.Error("No TX receipt after megabundle simulation", "TxHash", tx.Hash())
-				return
+				return true
 			}
 			if !status && !containsHash(megabundle.RevertingTxHashes, tx.Hash()) {
 				log.Info("Ignoring megabundle because of failing TX", "relay", w.flashbots.relayAddr, "TxHash", tx.Hash())
-				return
+				return true
 			}
 		}
 		coinbaseBalanceAfter := env.state.GetBalance(env.coinbase)
@@ -1315,15 +1317,17 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) {
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(env.signer, localTxs, env.header.BaseFee)
 		if w.commitTransactions(env, txs, interrupt) {
-			return
+			return true
 		}
 	}
 	if len(remoteTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(env.signer, remoteTxs, env.header.BaseFee)
 		if w.commitTransactions(env, txs, interrupt) {
-			return
+			return true
 		}
 	}
+
+	return false
 }
 
 // generateWork generates a sealing block based on the given parameters.
@@ -1334,7 +1338,11 @@ func (w *worker) generateWork(params *generateParams) (*types.Block, error) {
 	}
 	defer work.discard()
 
-	w.fillTransactions(nil, work)
+	shouldDiscard := w.fillTransactions(nil, work)
+	if shouldDiscard {
+		return nil, errors.New("could not generate valid block")
+	}
+
 	return w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, work.txs, work.unclelist(), work.receipts)
 }
 
@@ -1364,8 +1372,13 @@ func (w *worker) commitWork(interrupt *int32, noempty bool, timestamp int64) {
 	if !noempty && atomic.LoadUint32(&w.noempty) == 0 {
 		w.commit(work.copy(), nil, false, start)
 	}
+
 	// Fill pending transactions from the txpool
-	w.fillTransactions(interrupt, work)
+	shouldDiscard := w.fillTransactions(interrupt, work)
+	if shouldDiscard {
+		return
+	}
+
 	w.commit(work.copy(), w.fullTaskHook, true, start)
 
 	// Swap out the old work with the new one, terminating any leftover
