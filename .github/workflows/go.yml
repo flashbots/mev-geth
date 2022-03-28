@@ -56,10 +56,31 @@ jobs:
         path: e2e
 
     - run: cd e2e && yarn install
-    - run: |
+    - name: Run single node e2e
+      run: |
         cd e2e
         GETH=`pwd`/../build/bin/geth ./run.sh &
         sleep 15
         yarn run demo-simple
+        yarn run e2e-reverting-bundles
         yarn run demo-contract
+        pkill -9 geth || true
+    - name: Run private tx with two nodes
+      run: |
+        cd e2e
+        GETH=`pwd`/../build/bin/geth ./run.sh &
+        # Second node, not mining
+        P2P_PORT=30302 DATADIR=datadir2 HTTP_PORT=8546 MINER_ARGS='--nodiscover' GETH=`pwd`/../build/bin/geth ./run.sh &
+        sleep 15
+        DATADIR1=datadir DATADIR2=datadir2 GETH=`pwd`/../build/bin/geth ./peer_nodes.sh
+        sleep 15
         yarn run demo-private-tx
+        pkill -9 geth || true
+    - name: Run megabundle-only node checking for reverts
+      run: |
+        cd e2e
+        # Disable bundle workers
+        MINER_ARGS='--miner.etherbase=0xd912aecb07e9f4e1ea8e6b4779e7fb6aa1c3e4d8 --miner.trustedrelays=0xfb11e78C4DaFec86237c2862441817701fdf197F --mine --miner.threads=2 --miner.maxmergedbundles=0' GETH=`pwd`/../build/bin/geth ./run.sh &
+        sleep 15
+        yarn run e2e-reverting-megabundle
+        pkill -9 geth || true
