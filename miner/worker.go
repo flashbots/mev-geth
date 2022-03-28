@@ -925,7 +925,7 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 	return receipt.Logs, nil
 }
 
-// Returns whether the bundle should be discarded
+// Returns whether the block should be discarded
 func (w *worker) commitBundle(env *environment, txs types.Transactions, interrupt *int32) bool {
 	gasLimit := env.header.GasLimit
 	if env.gasPool == nil {
@@ -939,8 +939,7 @@ func (w *worker) commitBundle(env *environment, txs types.Transactions, interrup
 		// (1) new head block event arrival, the interrupt signal is 1
 		// (2) worker start or restart, the interrupt signal is 1
 		// (3) worker recreate the sealing block with any newly arrived transactions, the interrupt signal is 2.
-		// For the first two cases, the semi-finished work will be discarded.
-		// For the third case, the semi-finished work will be submitted to the consensus engine.
+		// Discard the interrupted work, since it is incomplete and contains partial bundles
 		if interrupt != nil && atomic.LoadInt32(interrupt) != commitInterruptNone {
 			// Notify resubmit loop to increase resubmitting interval due to too frequent commits.
 			if atomic.LoadInt32(interrupt) == commitInterruptResubmit {
@@ -954,12 +953,13 @@ func (w *worker) commitBundle(env *environment, txs types.Transactions, interrup
 				}
 			}
 
-			return atomic.LoadInt32(interrupt) == commitInterruptNewHead
+			return true
 		}
-		// If we don't have enough gas for any further transactions then we're done
+		// If we don't have enough gas for any further transactions discard the block
+		// since not all bundles of the were applied
 		if env.gasPool.Gas() < params.TxGas {
 			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas)
-			break
+			return true
 		}
 
 		// Error may be ignored here. The error has already been checked
@@ -1372,7 +1372,6 @@ func (w *worker) commitWork(interrupt *int32, noempty bool, timestamp int64) {
 	if !noempty && atomic.LoadUint32(&w.noempty) == 0 {
 		w.commit(work.copy(), nil, false, start)
 	}
-
 	// Fill pending transactions from the txpool
 	shouldDiscard := w.fillTransactions(interrupt, work)
 	if shouldDiscard {
@@ -1538,11 +1537,11 @@ func (w *worker) simulateBundles(env *environment, bundles []types.MevBundle, pe
 	simulatedBundles := []simulatedBundle{}
 
 	for _, bundle := range bundles {
-		state := env.state.Copy()
-		gasPool := new(core.GasPool).AddGas(env.header.GasLimit)
 		if len(bundle.Txs) == 0 {
 			continue
 		}
+		state := env.state.Copy()
+		gasPool := new(core.GasPool).AddGas(env.header.GasLimit)
 		simmed, err := w.computeBundleGas(env, bundle, state, gasPool, pendingTxs, 0)
 
 		if err != nil {
