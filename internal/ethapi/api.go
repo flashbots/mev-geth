@@ -19,7 +19,6 @@ package ethapi
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -2377,12 +2376,10 @@ func (s *BundleAPI) CallBundle(ctx context.Context, args CallBundleArgs) (map[st
 			jsonResult["error"] = result.Err.Error()
 			revert := result.Revert()
 			if len(revert) > 0 {
-				jsonResult["revert"] = string(revert)
+				jsonResult["revert"] = hexutil.Encode(revert)
 			}
 		} else {
-			dst := make([]byte, hex.EncodedLen(len(result.Return())))
-			hex.Encode(dst, result.Return())
-			jsonResult["value"] = "0x" + string(dst)
+			jsonResult["value"] = hexutil.Encode(result.Return())
 		}
 		coinbaseDiffTx := new(big.Int).Sub(state.GetBalance(coinbase), coinbaseBalanceBeforeTx)
 		jsonResult["coinbaseDiff"] = coinbaseDiffTx.String()
@@ -2403,7 +2400,7 @@ func (s *BundleAPI) CallBundle(ctx context.Context, args CallBundleArgs) (map[st
 	ret["totalGasUsed"] = totalGasUsed
 	ret["stateBlockNumber"] = parent.Number.Int64()
 
-	ret["bundleHash"] = "0x" + common.Bytes2Hex(bundleHash.Sum(nil))
+	ret["bundleHash"] = hexutil.Encode(bundleHash.Sum(nil))
 	return ret, nil
 }
 
