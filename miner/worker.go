@@ -1463,6 +1463,7 @@ type simulatedBundle struct {
 	ethSentToCoinbase *big.Int
 	totalGasUsed      uint64
 	originalBundle    types.MevBundle
+	simulatedTxs      types.Transactions
 }
 
 func (w *worker) generateFlashbotsBundle(env *environment, bundles []types.MevBundle, pendingTxs map[common.Address]types.Transactions) (types.Transactions, simulatedBundle, int, error) {
@@ -1501,16 +1502,16 @@ func (w *worker) mergeBundles(env *environment, bundles []simulatedBundle, pendi
 		floorGasPrice := new(big.Int).Mul(bundle.mevGasPrice, big.NewInt(99))
 		floorGasPrice = floorGasPrice.Div(floorGasPrice, big.NewInt(100))
 
-		simmed, err := w.computeBundleGas(env, bundle.originalBundle, currentState, gasPool, pendingTxs, len(finalBundle))
+		simmed, err := w.computeBundleGas(env, bundle.originalBundle, currentState, gasPool, pendingTxs, finalBundle)
 		if err != nil || simmed.mevGasPrice.Cmp(floorGasPrice) <= 0 {
 			currentState = prevState
 			gasPool = prevGasPool
 			continue
 		}
 
-		log.Info("Included bundle", "ethToCoinbase", ethIntToFloat(simmed.totalEth), "gasUsed", simmed.totalGasUsed, "bundleScore", simmed.mevGasPrice, "bundleLength", len(simmed.originalBundle.Txs), "worker", w.flashbots.maxMergedBundles)
+		log.Info("Included bundle", "ethToCoinbase", ethIntToFloat(simmed.totalEth), "gasUsed", simmed.totalGasUsed, "bundleScore", simmed.mevGasPrice, "bundleLength", len(simmed.simulatedTxs), "worker", w.flashbots.maxMergedBundles)
 
-		finalBundle = append(finalBundle, bundle.originalBundle.Txs...)
+		finalBundle = append(finalBundle, bundle.simulatedTxs...)
 		mergedBundle.totalEth.Add(mergedBundle.totalEth, simmed.totalEth)
 		mergedBundle.ethSentToCoinbase.Add(mergedBundle.ethSentToCoinbase, simmed.ethSentToCoinbase)
 		mergedBundle.totalGasUsed += simmed.totalGasUsed
@@ -1542,7 +1543,7 @@ func (w *worker) simulateBundles(env *environment, bundles []types.MevBundle, pe
 		}
 		state := env.state.Copy()
 		gasPool := new(core.GasPool).AddGas(env.header.GasLimit)
-		simmed, err := w.computeBundleGas(env, bundle, state, gasPool, pendingTxs, 0)
+		simmed, err := w.computeBundleGas(env, bundle, state, gasPool, pendingTxs, types.Transactions{})
 
 		if err != nil {
 			log.Debug("Error computing gas for a bundle", "error", err)
@@ -1565,14 +1566,31 @@ func containsHash(arr []common.Hash, match common.Hash) bool {
 
 // Compute the adjusted gas price for a whole bundle
 // Done by calculating all gas spent, adding transfers to the coinbase, and then dividing by gas used
-func (w *worker) computeBundleGas(env *environment, bundle types.MevBundle, state *state.StateDB, gasPool *core.GasPool, pendingTxs map[common.Address]types.Transactions, currentTxCount int) (simulatedBundle, error) {
+func (w *worker) computeBundleGas(env *environment, bundle types.MevBundle, state *state.StateDB, gasPool *core.GasPool, pendingTxs map[common.Address]types.Transactions, previousTxs types.Transactions) (simulatedBundle, error) {
 	var totalGasUsed uint64 = 0
 	var tempGasUsed uint64
 	gasFees := new(big.Int)
 
 	ethSentToCoinbase := new(big.Int)
 
+	simulatedTxs := types.Transactions{}
 	for i, tx := range bundle.Txs {
+		if containsHash(bundle.RevertingTxHashes, tx.Hash()) {
+			skipTx := false
+			for _, prevTx := range previousTxs {
+				if prevTx.Hash() == tx.Hash() {
+					skipTx = true
+					break
+				}
+			}
+			if skipTx {
+				// TX was already included in the block and we're allowed to skip
+				continue
+			} else {
+				simulatedTxs = append(simulatedTxs, tx)
+			}
+		}
+
 		if env.header.BaseFee != nil && tx.Type() == 2 {
 			// Sanity check for extremely large numbers
 			if tx.GasFeeCap().BitLen() > 256 {
@@ -1587,8 +1605,9 @@ func (w *worker) computeBundleGas(env *environment, bundle types.MevBundle, stat
 			}
 		}
 
-		state.Prepare(tx.Hash(), i+currentTxCount)
+		state.Prepare(tx.Hash(), i+len(previousTxs))
 		coinbaseBalanceBefore := state.GetBalance(env.coinbase)
+
 
 		receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, gasPool, state, env.header, tx, &tempGasUsed, *w.chain.GetVMConfig())
 		if err != nil {
@@ -1643,6 +1662,7 @@ func (w *worker) computeBundleGas(env *environment, bundle types.MevBundle, stat
 		ethSentToCoinbase: ethSentToCoinbase,
 		totalGasUsed:      totalGasUsed,
 		originalBundle:    bundle,
+		simulatedTxs:      simulatedTxs,
 	}, nil
 }
 
