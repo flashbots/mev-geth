@@ -365,6 +365,7 @@ func (pool *TxPool) loop() {
 	defer report.Stop()
 	defer evict.Stop()
 	defer journal.Stop()
+	defer privateTx.Stop()
 
 	// Notify tests that the init phase is done
 	close(pool.initDoneCh)
