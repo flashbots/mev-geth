@@ -58,6 +58,20 @@ type Transaction struct {
 	from atomic.Value
 }
 
+type EncryptedTransaction struct {
+	inner TxData    // Consensus contents of a transaction
+	time  time.Time // Time first seen locally (spam avoidance)
+
+	// caches
+	hash atomic.Value
+	size atomic.Value
+	from atomic.Value
+
+	// for encrypted
+	GasUsed   uint64
+	Encrypted bool
+}
+
 // NewTx creates a new transaction.
 func NewTx(inner TxData) *Transaction {
 	tx := new(Transaction)
@@ -399,6 +413,8 @@ func (tx *Transaction) WithSignature(signer Signer, sig []byte) (*Transaction, e
 // Transactions implements DerivableList for transactions.
 type Transactions []*Transaction
 
+type EncryptedTransactions []*EncryptedTransaction
+
 // Len returns the length of s.
 func (s Transactions) Len() int { return len(s) }
 
@@ -654,6 +670,14 @@ func copyAddressPtr(a *common.Address) *common.Address {
 
 type MevBundle struct {
 	Txs               Transactions
+	BlockNumber       *big.Int
+	MinTimestamp      uint64
+	MaxTimestamp      uint64
+	RevertingTxHashes []common.Hash
+}
+
+type EncryptedMevBundle struct {
+	Txs               EncryptedTransactions
 	BlockNumber       *big.Int
 	MinTimestamp      uint64
 	MaxTimestamp      uint64

@@ -1571,6 +1571,96 @@ func containsHash(arr []common.Hash, match common.Hash) bool {
 	return false
 }
 
+func (w *worker) computeEncryptedBundleGas(env *environment, bundle types.EncryptedMevBundle, state *state.StateDB, gasPool *core.GasPool, pendingTxs map[common.Address]types.Transactions, currentTxCount int) (simulatedEncryptedBundle, error) {
+	var totalGasUsed uint64 = 0
+	var tempGasUsed uint64
+	gasFees := new(big.Int)
+
+	ethSentToCoinbase := new(big.Int)
+
+	for i, tx := range bundle.Txs {
+		if env.header.BaseFee != nil && tx.Type() == 2 {
+			// Sanity check for extremely large numbers
+			if tx.GasFeeCap().BitLen() > 256 {
+				return simulatedBundle{}, core.ErrFeeCapVeryHigh
+			}
+			if tx.GasTipCap().BitLen() > 256 {
+				return simulatedBundle{}, core.ErrTipVeryHigh
+			}
+			// Ensure gasFeeCap is greater than or equal to gasTipCap.
+			if tx.GasFeeCapIntCmp(tx.GasTipCap()) < 0 {
+				return simulatedBundle{}, core.ErrTipAboveFeeCap
+			}
+		}
+
+		if tx.Encrypted {
+			// first transaction always unencrypted for the tip
+			state.Prepare(tx.Hash(), i+currentTxCount)
+			coinbaseBalanceBefore := state.GetBalance(env.coinbase)
+
+			receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, gasPool, state, env.header, tx, &tempGasUsed, *w.chain.GetVMConfig())
+			if err != nil {
+				return simulatedBundle{}, err
+			}
+			if receipt.Status == types.ReceiptStatusFailed && !containsHash(bundle.RevertingTxHashes, receipt.TxHash) {
+				return simulatedBundle{}, errors.New("failed tx")
+			}
+
+			totalGasUsed += receipt.GasUsed
+
+			from, err := types.Sender(env.signer, tx)
+			if err != nil {
+				return simulatedBundle{}, err
+			}
+
+			txInPendingPool := false
+			if accountTxs, ok := pendingTxs[from]; ok {
+				// check if tx is in pending pool
+				txNonce := tx.Nonce()
+
+				for _, accountTx := range accountTxs {
+					if accountTx.Nonce() == txNonce {
+						txInPendingPool = true
+						break
+					}
+				}
+			}
+
+			gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+			gasPrice, err := tx.EffectiveGasTip(env.header.BaseFee)
+			if err != nil {
+				return simulatedBundle{}, err
+			}
+			gasFeesTx := gasUsed.Mul(gasUsed, gasPrice)
+			coinbaseBalanceAfter := state.GetBalance(env.coinbase)
+			coinbaseDelta := big.NewInt(0).Sub(coinbaseBalanceAfter, coinbaseBalanceBefore)
+			coinbaseDelta.Sub(coinbaseDelta, gasFeesTx)
+			ethSentToCoinbase.Add(ethSentToCoinbase, coinbaseDelta)
+
+			if !txInPendingPool {
+				// If tx is not in pending pool, count the gas fees
+				gasFees.Add(gasFees, gasFeesTx)
+			}
+		} else {
+			// encrypted transactions
+			totalGasUsed += tx.GasUsed
+			gasUsed := new(big.Int).SetUint64(tx.GasUsed)
+			gasFeesTx := gasUsed.mul(gasUsed, gasPrice)
+			gasFees.Add(gasFees, gasFeesTx)
+		}
+	}
+
+	totalEth := new(big.Int).Add(ethSentToCoinbase, gasFees)
+
+	return simulatedEncryptedBundle{
+		mevGasPrice:       new(big.Int).Div(totalEth, new(big.Int).SetUint64(totalGasUsed)),
+		totalEth:          totalEth,
+		ethSentToCoinbase: ethSentToCoinbase,
+		totalGasUsed:      totalGasUsed,
+		originalBundle:    bundle,
+	}, nil
+}
+
 // Compute the adjusted gas price for a whole bundle
 // Done by calculating all gas spent, adding transfers to the coinbase, and then dividing by gas used
 func (w *worker) computeBundleGas(env *environment, bundle types.MevBundle, state *state.StateDB, gasPool *core.GasPool, pendingTxs map[common.Address]types.Transactions, currentTxCount int) (simulatedBundle, error) {
