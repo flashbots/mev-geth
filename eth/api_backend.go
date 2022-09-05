@@ -254,7 +254,7 @@ func (b *EthAPIBackend) SendBundle(ctx context.Context, txs types.Transactions, 
 	return b.eth.txPool.AddMevBundle(txs, big.NewInt(blockNumber.Int64()), minTimestamp, maxTimestamp, revertingTxHashes)
 }
 
-func (b *EthAPIBackend) SendEncryptedBundle(ctx context.Context, txs types.EncryptedTransactions, blockNumer rpc.blockNumber, minTimestamp uint64, maxTimestamp uint64, revertingTxHashes []common.Hash) error {
+func (b *EthAPIBackend) SendEncryptedBundle(ctx context.Context, txs types.EncryptedTransactions, blockNumber rpc.blockNumber, minTimestamp uint64, maxTimestamp uint64, revertingTxHashes []common.Hash) error {
 	return b.eth.txPool.AddEncryptedMevBundle(txs, big.NewInt(blockNumber.Int64()), minTimestamp, maxTimestamp, revertingTxHashes)
 }
 
