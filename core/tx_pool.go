@@ -260,15 +260,16 @@ type TxPool struct {
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
 	journal *txJournal  // Journal of local transaction to back up to disk
 
-	pending            map[common.Address]*txList   // All currently processable transactions
-	queue              map[common.Address]*txList   // Queued but non-processable transactions
-	beats              map[common.Address]time.Time // Last heartbeat from each known account
-	mevBundles         []types.MevBundle
-	megabundles        map[common.Address]types.MevBundle // One megabundle per each trusted relay
-	NewMegabundleHooks []func(common.Address, *types.MevBundle)
-	all                *txLookup     // All transactions to allow lookups
-	priced             *txPricedList // All transactions sorted by price
-	privateTxs         *timestampedTxHashSet
+	pending            	map[common.Address]*txList   // All currently processable transactions
+	queue              	map[common.Address]*txList   // Queued but non-processable transactions
+	beats              	map[common.Address]time.Time // Last heartbeat from each known account
+	mevBundles         	[]types.MevBundle
+	encryptedMevBundles	[]types.EncryptedMevBundle
+	megabundles        	map[common.Address]types.MevBundle // One megabundle per each trusted relay
+	NewMegabundleHooks 	[]func(common.Address, *types.MevBundle)
+	all                	*txLookup     // All transactions to allow lookups
+	priced             	*txPricedList // All transactions sorted by price
+	privateTxs         	*timestampedTxHashSet
 
 	chainHeadCh     chan ChainHeadEvent
 	chainHeadSub    event.Subscription
@@ -661,6 +662,20 @@ func (pool *TxPool) AddMevBundle(txs types.Transactions, blockNumber *big.Int, m
 	defer pool.mu.Unlock()
 
 	pool.mevBundles = append(pool.mevBundles, types.MevBundle{
+		Txs:               txs,
+		BlockNumber:       blockNumber,
+		MinTimestamp:      minTimestamp,
+		MaxTimestamp:      maxTimestamp,
+		RevertingTxHashes: revertingTxHashes,
+	})
+	return nil
+}
+
+func (pool *TxPool) AddEncryptedMevBundle(txs types.EncryptedTransactions, blockNumber *big.Int, minTimestamp, maxTimestamp uint64, revertingTxHashes []common.Hash) error {
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
+	pool.encyptedMevBundles = append(pool.encryptedMevBundles, types.EncryptedMevBundle{
 		Txs:               txs,
 		BlockNumber:       blockNumber,
 		MinTimestamp:      minTimestamp,
