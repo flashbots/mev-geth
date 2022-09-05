@@ -587,6 +587,10 @@ func (pool *TxPool) AllMevBundles() []types.MevBundle {
 	return pool.mevBundles
 }
 
+func (pool *TxPool) AllEncryptedMevBundles() []types.EncryptedMevBundle {
+	return pool.encryptedMevBundles
+}
+
 // MevBundles returns a list of bundles valid for the given blockNumber/blockTimestamp
 // also prunes bundles that are outdated
 func (pool *TxPool) MevBundles(blockNumber *big.Int, blockTimestamp uint64) ([]types.MevBundle, error) {
