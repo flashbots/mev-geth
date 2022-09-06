@@ -2081,6 +2081,14 @@ type SendBundleArgs struct {
 	RevertingTxHashes []common.Hash   `json:"revertingTxHashes"`
 }
 
+type SendEncryptedBundleArgs struct {
+	Txs               []hexutil.Bytes `json:"txs"`
+	BlockNumber       rpc.BlockNumber `json:"blockNumber"`
+	MinTimestamp      *uint64         `json:"minTimestamp"`
+	MaxTimestamp      *uint64         `json:"maxTimestamp"`
+	RevertingTxHashes []common.Hash   `json:"revertingTxHashes"`
+}
+
 // SendMegabundleArgs represents the arguments for a SendMegabundle call.
 type SendMegabundleArgs struct {
 	Txs               []hexutil.Bytes `json:"txs"`
@@ -2128,6 +2136,34 @@ func (s *PrivateTxBundleAPI) SendBundle(ctx context.Context, args SendBundleArgs
 	}
 
 	return s.b.SendBundle(ctx, txs, args.BlockNumber, minTimestamp, maxTimestamp, args.RevertingTxHashes)
+}
+
+func (s *PrivateTxBundleAPI) SendEncryptedBundle(ctx context.Context, args SendEncryptedBundleArgs) error {
+	var txs types.EncryptedTransactions
+	if len(args.Txs) == 0 {
+		return errors.New("bundle missing txs")
+	}
+	if args.BlockNumber == 0 {
+		return errors.New("bundle missing blockNumber")
+	}
+
+	for _, encodedTx := range args.Txs {
+		tx := new(types.Transaction)
+		if err := tx.UnmarshalBinary(encodedTx); err != nil {
+			return err
+		}
+		txs = append(txs, tx)
+	}
+
+	var minTimestamp, maxTimestamp uint64
+	if args.MinTimestamp != nil {
+		minTimestamp = *args.MinTimestamp
+	}
+	if args.MaxTimestamp != nil {
+		maxTimestamp = *args.MaxTimestamp
+	}
+
+	return s.b.SendEncryptedBundle(ctx, txs, args.BlockNumber, minTimestamp, maxTimestamp, args.RevertingTxHashes)
 }
 
 // Recovers the Ethereum address of the trusted relay that signed the megabundle.
