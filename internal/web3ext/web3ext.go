@@ -607,6 +607,11 @@ web3._extend({
 			params: 1,
 		}),
 		new web3._extend.Method({
+			name: 'sendEncryptedBundle',
+			call: 'eth_sendEncryptedBundle',
+			params: 1,
+		}),
+		new web3._extend.Method({
 			name: 'sendMegabundle',
 			call: 'eth_sendMegabundle',
 			params: 1
